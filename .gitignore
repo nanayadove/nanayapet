@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.venv
+
+# 忽略配置文件（保护API Key）
+config.json
+
+# 忽略本地数据库（保护聊天隐私）
+memory.db
