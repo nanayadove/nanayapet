@@ -44,17 +44,15 @@ class SettingsWindow(QDialog):
         char_group.setLayout(char_form)
         layout.addWidget(char_group)
 
-        # 1. 选择服务商 (Provider)
-        prov_layout = QHBoxLayout()
-        prov_layout.addWidget(QLabel("服务商 (Provider):"))
-        self.prov_combo = QComboBox()
-        self.prov_combo.addItems(["deepseek", "openai", "gemini", "custom_openai"])
-        prov_layout.addWidget(self.prov_combo)
-        layout.addLayout(prov_layout)
 
-        # 2. API 配置组
+
+        # 1. API 配置组 (合并在一个框内)
         group = QGroupBox("API 接口配置")
         form = QFormLayout()
+
+        self.prov_combo = QComboBox()
+        self.prov_combo.addItems(["deepseek", "openai", "gemini", "custom_openai"])
+        form.addRow("服务商 (Provider):", self.prov_combo)
         
         self.base_url_input = QLineEdit()
         self.base_url_input.setPlaceholderText("例如: https://api.deepseek.com/v1")
@@ -65,11 +63,24 @@ class SettingsWindow(QDialog):
         self.api_key_input.setPlaceholderText("输入你的 API Key (sk-...)")
         form.addRow("API Key:", self.api_key_input)
         
+        # 将模型选择和测试按钮放在同一行
+        model_layout = QHBoxLayout()
+        self.model_combo = QComboBox()
+        self.model_combo.setEditable(True)
+        self.model_combo.setToolTip("选择获取到的模型，或者手动输入模型名称")
+        model_layout.addWidget(self.model_combo)
+        
+        self.test_btn = QPushButton("获取模型列表")
+        self.test_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.test_btn.clicked.connect(self.test_connection)
+        model_layout.addWidget(self.test_btn)
+        
+        form.addRow("选择模型:", model_layout)
         
         self.summary_prov_combo = QComboBox()
         self.summary_prov_combo.addItems(["同对话服务商", "deepseek", "openai", "gemini", "custom_openai"])
         self.summary_prov_combo.setToolTip("选择后台自动总结时使用的 API，选'同对话'则不分开")
-        form.addRow("总结服务商:", self.summary_prov_combo)
+        form.addRow("后台总结服务商:", self.summary_prov_combo)
         
         self.summary_interval_input = QSpinBox()
         self.summary_interval_input.setRange(1, 50)
@@ -78,23 +89,6 @@ class SettingsWindow(QDialog):
         
         group.setLayout(form)
         layout.addWidget(group)
-
-        # 3. 测试与模型获取
-        test_layout = QHBoxLayout()
-        self.test_btn = QPushButton("连接并获取模型")
-        self.test_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
-        self.test_btn.clicked.connect(self.test_connection)
-        test_layout.addWidget(self.test_btn)
-        layout.addLayout(test_layout)
-
-        # 4. 模型选择
-        model_layout = QHBoxLayout()
-        model_layout.addWidget(QLabel("当前选择的模型:"))
-        self.model_combo = QComboBox()
-        self.model_combo.setEditable(True) # 允许手动输入
-        self.model_combo.setToolTip("选择获取到的模型，或者手动输入模型名称")
-        model_layout.addWidget(self.model_combo)
-        layout.addLayout(model_layout)
 
         layout.addStretch(1)
 
@@ -179,7 +173,7 @@ class SettingsWindow(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "失败", f"连接或获取模型列表失败，请检查 URL 和 Key 是否正确:\n{str(e)}")
         
-        self.test_btn.setText("连接并获取模型")
+        self.test_btn.setText("获取模型列表")
         self.test_btn.setEnabled(True)
 
     def save_and_close(self):
