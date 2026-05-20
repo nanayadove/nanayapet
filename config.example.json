@@ -25,7 +25,8 @@
       }
     },
     "temperature": 0.7,
-    "max_history_length": 10
+    "max_history_length": 10,
+    "summary_provider": "同对话服务商"
   },
   "character_settings": {
     "name": "七夜喵",

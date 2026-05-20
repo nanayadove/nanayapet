@@ -2,7 +2,7 @@ import json
 import os
 import requests
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QLineEdit, QComboBox, QPushButton, QMessageBox, QGroupBox, QFormLayout, QApplication, QSpinBox)
+                             QLineEdit, QComboBox, QPushButton, QMessageBox, QGroupBox, QFormLayout, QApplication, QSpinBox, QTextEdit)
 from PyQt5.QtCore import Qt
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
@@ -11,7 +11,7 @@ class SettingsWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("API 与模型设置")
-        self.setFixedSize(450, 400)
+        self.setFixedSize(500, 650)
         
         # 保证设置窗口在宠物层之上
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
@@ -33,6 +33,17 @@ class SettingsWindow(QDialog):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
+        
+        # 0. 角色设定
+        char_group = QGroupBox("角色设定")
+        char_form = QFormLayout()
+        self.sys_prompt_input = QTextEdit()
+        self.sys_prompt_input.setPlaceholderText("在这里输入角色的 System Prompt...")
+        self.sys_prompt_input.setMaximumHeight(100)
+        char_form.addRow("设定(Prompt):", self.sys_prompt_input)
+        char_group.setLayout(char_form)
+        layout.addWidget(char_group)
+
         # 1. 选择服务商 (Provider)
         prov_layout = QHBoxLayout()
         prov_layout.addWidget(QLabel("服务商 (Provider):"))
@@ -53,6 +64,12 @@ class SettingsWindow(QDialog):
         self.api_key_input.setEchoMode(QLineEdit.Password)
         self.api_key_input.setPlaceholderText("输入你的 API Key (sk-...)")
         form.addRow("API Key:", self.api_key_input)
+        
+        
+        self.summary_prov_combo = QComboBox()
+        self.summary_prov_combo.addItems(["同对话服务商", "deepseek", "openai", "gemini", "custom_openai"])
+        self.summary_prov_combo.setToolTip("选择后台自动总结时使用的 API，选'同对话'则不分开")
+        form.addRow("总结服务商:", self.summary_prov_combo)
         
         self.summary_interval_input = QSpinBox()
         self.summary_interval_input.setRange(1, 50)
@@ -92,6 +109,16 @@ class SettingsWindow(QDialog):
         layout.addLayout(btn_layout)
 
         # 初始化数据回填
+        
+        # 初始化数据回填
+        char_config = self.config.get("character_settings", {})
+        self.sys_prompt_input.setPlainText(char_config.get("system_prompt", ""))
+        
+        sum_prov = self.config.get("api_settings", {}).get("summary_provider", "同对话服务商")
+        if sum_prov not in ["同对话服务商", "deepseek", "openai", "gemini", "custom_openai"]:
+            self.summary_prov_combo.addItem(sum_prov)
+        self.summary_prov_combo.setCurrentText(sum_prov)
+
         self.prov_combo.currentTextChanged.connect(self.on_provider_changed)
         current_prov = self.config.get("api_settings", {}).get("provider", "deepseek")
         if current_prov not in ["deepseek", "openai", "gemini", "custom_openai"]:
@@ -167,6 +194,12 @@ class SettingsWindow(QDialog):
         self.config["api_settings"]["providers"][prov_name]["base_url"] = self.base_url_input.text().strip()
         self.config["api_settings"]["providers"][prov_name]["api_key"] = self.api_key_input.text().strip()
         self.config["api_settings"]["providers"][prov_name]["model"] = self.model_combo.currentText().strip()
+        
+        if "character_settings" not in self.config:
+            self.config["character_settings"] = {}
+        self.config["character_settings"]["system_prompt"] = self.sys_prompt_input.toPlainText().strip()
+        
+        self.config["api_settings"]["summary_provider"] = self.summary_prov_combo.currentText()
         self.config["api_settings"]["summary_interval"] = self.summary_interval_input.value()
         
         self.save_config()

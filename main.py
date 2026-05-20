@@ -100,14 +100,25 @@ class LLMWorker(QThread):
             if unsummarized_count >= summary_interval * 2:
                 unsummarized_msgs = get_unsummarized_messages()
                 
-                summary_prompt = "请将以下对话总结为一段简短的背景记忆，保留核心事件、用户的状态和你的情感态度，字数不超过200字。直接输出总结文本即可：\n\n"
+                summary_prompt = "请以第三人称客观视角（使用“用户”和“AI”/“桌宠”作为主语）将以下对话总结为一段简短的背景记忆，保留核心事件、双方的状态和情感态度，字数不超过200字。直接输出总结文本即可：\n\n"
                 for msg in unsummarized_msgs:
                     role_str = "用户" if msg['role'] == "user" else "你"
                     summary_prompt += f"{role_str}: {msg['content']}\n"
                     
                 try:
-                    summary_res = client.chat.completions.create(
-                        model=model_name,
+                    summary_provider_name = api_config.get("summary_provider", "")
+                    if summary_provider_name and summary_provider_name != "同对话服务商":
+                        sum_prov_cfg = api_config.get("providers", {}).get(summary_provider_name, {})
+                        s_api_key = sum_prov_cfg.get("api_key", api_key)
+                        s_base_url = sum_prov_cfg.get("base_url", base_url)
+                        s_model = sum_prov_cfg.get("model", model_name)
+                    else:
+                        s_api_key, s_base_url, s_model = api_key, base_url, model_name
+                    
+                    s_client = OpenAI(api_key=s_api_key, base_url=s_base_url)
+                    
+                    summary_res = s_client.chat.completions.create(
+                        model=s_model,
                         messages=[{"role": "system", "content": "你是一个对话总结助手。"},
                                   {"role": "user", "content": summary_prompt}],
                         temperature=0.5
