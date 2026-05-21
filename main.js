@@ -83,6 +83,7 @@ function openSettings() {
 
 // ===== IPC 处理器 =====
 ipcMain.handle('config:get', () => config.load())
+ipcMain.handle('config:save', (_e, newConfig) => config.save(newConfig))
 // 发消息给 LLM
 ipcMain.handle('llm:send', async (_event, userText) => {
   const cfg = config.load()
