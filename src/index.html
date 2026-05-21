@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>NetPet</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 弹性空间：把下面内容推到窗口底部 -->
+  <div class="spacer"></div>
+
+  <!-- 顶部按钮栏：在气泡正上方 -->
+  <div id="top-bar">
+    <span></span><!-- 占位用 flex:1 -->
+    <button id="settings-btn" class="top-btn">⚙️</button>
+    <button id="close-btn" class="top-btn close">×</button>
+  </div>
+
+  <!-- 聊天气泡 -->
+  <div id="bubble">只是一只七夜喵。</div>
+
+  <!-- 角色立绘 -->
+  <div id="image-area">
+    <img id="pet-image" src="../assets/idle.png" alt="pet">
+  </div>
+
+  <!-- 输入框 -->
+  <input id="input-field" type="text" placeholder="在这里输入你想对它说的话... (按回车发送)">
+
+  <script src="renderer.js"></script>
+</body>
+</html>

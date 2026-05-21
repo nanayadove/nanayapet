@@ -1,0 +1,28 @@
+{
+  "name": "netpet",
+  "version": "1.0.0",
+  "description": "桌面LLM虚拟宠物 - Electron版",
+  "main": "main.js",
+  "scripts": {
+    "start": ".\\node_modules\\electron\\dist\\electron.exe .",
+    "dev": ".\\node_modules\\electron\\dist\\electron.exe . --dev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nanayadove/nanayapet.git"
+  },
+  "keywords": [
+    "desktop-pet",
+    "electron",
+    "llm"
+  ],
+  "author": "nanayadove",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^42.2.0"
+  },
+  "dependencies": {
+    "openai": "^6.38.0",
+    "sql.js": "^1.14.1"
+  }
+}

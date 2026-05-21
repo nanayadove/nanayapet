@@ -8,8 +8,18 @@ venv/
 .env
 .venv
 
-# 忽略配置文件（保护API Key）
+# 配置文件（保护API Key）
 config.json
 
-# 忽略本地数据库（保护聊天隐私）
+# 本地数据库
 memory.db
+
+# Node.js
+node_modules/
+
+# 日志
+*.log
+
+# 临时文件
+screenshot.png
+install_electron.bat
