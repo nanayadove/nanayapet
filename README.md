@@ -1,45 +1,84 @@
-# 桌面智能虚拟宠物框架 (Desktop LLM Pet)
+# NetPet - 桌面LLM虚拟宠物
 
-这是一个轻量级、高度可定制的桌面虚拟宠物框架。通过在本地直接调用大语言模型 (LLM) API，让你能够轻松打造属于自己的专属 AI 桌面伙伴。
+基于 Electron + JavaScript 的桌面 AI 宠物框架。通过在本地直接调用大语言模型 (LLM) API，打造属于你自己的 AI 桌面伙伴。
 
-无论是傲娇猫娘、沉稳大叔，还是冷酷杀手，只需简单修改设定，即可完美适配。
+无论是傲娇猫娘、沉稳大叔还是冷酷杀手，只需修改 System Prompt，即可完美适配。
 
-## 🌟 核心特性
+## 特性
 
-* **纯本地 LLM 驱动**：使用 Python `openai` 库直连大模型。完美兼容 DeepSeek、Gemini、OpenAI 等支持标准格式的 API，响应更迅速，数据更安全。
-* **无限角色定制**：完全解耦的设定系统。通过修改 `config.json` 中的 System Prompt 和 Few-shot 样例，你可以随时重塑桌宠的性格、说话口癖和行为逻辑。
-* **可视化配置面板**：内置基于 PyQt5 编写的设置界面。无需修改代码，直接在 UI 中输入 API Key、切换模型供应商 (Provider) 及调整基础参数。
-* **智能本地记忆管理**：
-  * **轻量级存储**：采用单文件 `SQLite` 数据库保存对话历史，告别繁重配置，即开即用。
-  * **无感记忆压缩**：内置后台自动总结机制。每隔指定的对话轮数（如默认 5 轮），系统会自动发起后台请求压缩上下文提要。有效防止对话过长导致的 Token 爆炸，同时保留核心记忆。
-* **沉浸式桌面交互**：
-  * 无边框透明窗口，支持鼠标自由拖拽。
-  * **情绪驱动系统**：LLM 强制输出 JSON 格式（回复内容 + 情绪状态），自动映射并无缝切换对应的立绘表情（支持扩展更多自定义表情）。
+- **Electron 桌面应用**：HTML/CSS 构建的现代 UI，支持透明窗口、拖拽、气泡对话
+- **情绪驱动立绘**：LLM 输出 JSON 格式 `{ reply, emotion }`，自动切换 6 种表情立绘
+- **独立设置窗口**：可视化配置 API Key、模型、Provider，支持测试连接
+- **SQLite 记忆系统**：自动保存对话历史，支持后台总结压缩长程记忆
+- **角色设定完全解耦**：修改 `config.json` 中的 System Prompt 即可换人设
 
-## 🚀 快速开始
+## 快速开始
 
-### 1. 安装依赖环境
-请确保你的电脑上安装了 Python 3.8 或更高版本，然后在终端运行以下命令安装必要依赖：
+### 1. 安装依赖
+
+确保已安装 [Node.js](https://nodejs.org/) (推荐 v20+)。
 
 ```bash
-pip install openai PyQt5
+cd D:\code\netpet
+npm install
 ```
 
-### 2. 配置你的专属桌宠
-启动前你需要：
-1. 在项目根目录，复制一份 `config.example.json` 文件。
-2. 将复制出来的文件重命名为 `config.json`。
-3. 打开 `config.json`：
-   - 填入你自己的 API Key。（也可以在设置里填写，后续会加入可视化界面允许用户直接在可视化界面修改提示词）
-   - 修改 `character_settings` 中的 `name`（名字）和 `system_prompt`（人设提示词），赋予它全新的灵魂。
-4. （可选）替换 `assets/` 目录下的表情图片（idle, happy, angry, sad, shy, confused.png），换上你喜欢的角色立绘。
+### 2. 配置
 
-### 3. 唤醒桌宠
-在项目目录下运行主程序：
+编辑 `config.json`，填入你的 API Key：
+
+```json
+"deepseek": {
+    "base_url": "https://api.deepseek.com/v1",
+    "api_key": "sk-你的key",
+    "model": "deepseek-v4-flash"
+}
+```
+
+支持：DeepSeek / OpenAI / Gemini / 自定义 OpenAI 兼容接口
+
+### 3. 启动
 
 ```bash
-python main.py
+npm start
 ```
 
-## 一些碎碎念
-只是一个练手的项目所以~~根本没有成熟的地方~~还请见谅，现阶段更多是给自己留个备份慢慢增加功能
+或双击 `启动桌宠.bat`。
+
+调试模式（带 DevTools）：
+```bash
+npm run dev
+```
+
+### 4. 自定义角色
+
+修改 `config.json` 中的 `character_settings.system_prompt`，即可更换角色性格、语气、口癖。
+
+## 项目结构
+
+```
+netpet/
+├── main.js              # Electron 主进程（窗口管理 + IPC）
+├── preload.js           # IPC 桥接
+├── config.json          # 配置（API Key、角色设定、UI尺寸）
+├── memory.db            # SQLite 对话数据库
+├── src/
+│   ├── index.html       # 宠物窗口 UI
+│   ├── style.css        # UI 样式
+│   ├── renderer.js      # 前台逻辑
+│   ├── settings.html    # 设置窗口 UI
+│   ├── settings.js      # 设置窗口逻辑
+│   ├── config.js        # 配置读写
+│   ├── llm.js           # LLM API 通信
+│   └── db.js            # SQLite 记忆存储
+├── assets/              # 立绘素材 (PNG)
+└── 启动桌宠.bat         # 一键启动
+```
+
+## 记忆系统
+
+对话自动存入 SQLite，每 N 轮对话自动总结为背景记忆，防止长对话 Token 溢出。
+
+## 许可证
+
+ISC
