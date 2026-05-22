@@ -1,3 +1,5 @@
 @echo off
+chcp 65001 >nul
 cd /d D:\code\netpet
-.\node_modules\electron\dist\electron.exe .
+start "" ".\node_modules\electron\dist\electron.exe" .
+exit

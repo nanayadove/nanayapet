@@ -8,6 +8,8 @@ const inpPrompt = document.getElementById('inp-prompt')
 const selSummaryProvider = document.getElementById('sel-summary-provider')
 const inpSummaryInterval = document.getElementById('inp-summary-interval')
 const inpMaxHistory = document.getElementById('inp-max-history')
+const selToolProvider = document.getElementById('sel-tool-provider')
+const inpToolModel = document.getElementById('inp-tool-model')
 const btnFetch = document.getElementById('btn-fetch')
 const btnSave = document.getElementById('btn-save')
 const btnCancel = document.getElementById('btn-cancel')
@@ -37,6 +39,8 @@ function applyToUI(config) {
   selSummaryProvider.value = api.summary_provider || '同对话服务商'
   inpSummaryInterval.value = api.summary_interval ?? 5
   inpMaxHistory.value = api.max_history_length ?? 10
+  selToolProvider.value = api.tool_provider || '同对话服务商'
+  inpToolModel.value = api.tool_model || ''
   inpPrompt.value = config.character_settings?.system_prompt || ''
 }
 
@@ -55,7 +59,9 @@ function collectFromUI() {
       temperature: parseFloat(inpTemperature.value) || 0.7,
       summary_provider: selSummaryProvider.value,
       summary_interval: parseInt(inpSummaryInterval.value) || 5,
-      max_history_length: parseInt(inpMaxHistory.value) || 10
+      max_history_length: parseInt(inpMaxHistory.value) || 10,
+      tool_provider: selToolProvider.value === '同对话服务商' ? '' : selToolProvider.value,
+      tool_model: inpToolModel.value.trim() || '',
     },
     character_settings: {
       name: '七夜',

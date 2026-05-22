@@ -27,6 +27,19 @@ async function getDb() {
     )
   `)
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS tools (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      label TEXT,
+      content TEXT,
+      status TEXT DEFAULT 'active',
+      trigger_at TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME
+    )
+  `)
+
   saveDb()
   return db
 }
@@ -205,6 +218,108 @@ async function doSummarize(apiConfig, summaryData) {
   }
 }
 
+// ===== 工具 CRUD =====
+
+function saveTool(type, label, content, triggerAt) {
+  const stmt = db.prepare(
+    'INSERT INTO tools (type, label, content, status, trigger_at) VALUES (?, ?, ?, ?, ?)'
+  )
+  stmt.run([type, label, content, 'active', triggerAt || null])
+  const id = db.exec('SELECT last_insert_rowid() as id')[0].values[0][0]
+  stmt.free()
+  saveDb()
+  return id
+}
+
+function getToolsByType(type, status) {
+  let sql = 'SELECT * FROM tools WHERE type = ?'
+  const params = [type]
+  if (status) {
+    sql += ' AND status = ?'
+    params.push(status)
+  }
+  sql += ' ORDER BY id DESC'
+  const stmt = db.prepare(sql)
+  stmt.bind(params)
+  const rows = []
+  while (stmt.step()) {
+    rows.push(stmt.getAsObject())
+  }
+  stmt.free()
+  return rows
+}
+
+function getToolById(id) {
+  const stmt = db.prepare('SELECT * FROM tools WHERE id = ?')
+  stmt.bind([id])
+  const result = stmt.step() ? stmt.getAsObject() : null
+  stmt.free()
+  return result
+}
+
+function searchTools(query) {
+  const like = `%${query}%`
+  const stmt = db.prepare(
+    'SELECT * FROM tools WHERE (label LIKE ? OR content LIKE ?) AND status = ? ORDER BY id DESC LIMIT 20'
+  )
+  stmt.bind([like, like, 'active'])
+  const rows = []
+  while (stmt.step()) {
+    rows.push(stmt.getAsObject())
+  }
+  stmt.free()
+  return rows
+}
+
+function getAllActiveTools() {
+  const stmt = db.prepare(
+    "SELECT * FROM tools WHERE status = 'active' ORDER BY type, id DESC"
+  )
+  const rows = []
+  while (stmt.step()) {
+    rows.push(stmt.getAsObject())
+  }
+  stmt.free()
+  return rows
+}
+
+function completeTool(id) {
+  const stmt = db.prepare(
+    "UPDATE tools SET status = 'completed', completed_at = datetime('now') WHERE id = ?"
+  )
+  stmt.run([id])
+  stmt.free()
+  saveDb()
+}
+
+function deleteTool(id) {
+  const stmt = db.prepare('DELETE FROM tools WHERE id = ?')
+  stmt.run([id])
+  stmt.free()
+  saveDb()
+}
+
+function getUpcomingSchedules() {
+  const stmt = db.prepare(
+    "SELECT * FROM tools WHERE type = 'schedule' AND status = 'active' AND trigger_at IS NOT NULL ORDER BY trigger_at ASC"
+  )
+  const rows = []
+  while (stmt.step()) {
+    rows.push(stmt.getAsObject())
+  }
+  stmt.free()
+  return rows
+}
+
+function markScheduleFired(id) {
+  const stmt = db.prepare(
+    "UPDATE tools SET status = 'completed', completed_at = datetime('now') WHERE id = ?"
+  )
+  stmt.run([id])
+  stmt.free()
+  saveDb()
+}
+
 module.exports = {
   getDb,
   saveMessage,
@@ -213,4 +328,13 @@ module.exports = {
   getUnsummarizedMessages,
   checkAndSummarize,
   doSummarize,
+  saveTool,
+  getToolsByType,
+  getToolById,
+  searchTools,
+  getAllActiveTools,
+  completeTool,
+  deleteTool,
+  getUpcomingSchedules,
+  markScheduleFired,
 }

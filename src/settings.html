@@ -106,6 +106,29 @@
     <div style="font-size:11px;color:#999;margin-top:2px;">每次请求带上最近多少条对话</div>
   </div>
 
+  <!-- ===== 工具系统 ===== -->
+  <div class="section-title">▸ Agent 工具系统</div>
+  <div style="font-size:11px;color:#999;margin-top:-8px;margin-bottom:10px;">
+    启用后，桌宠可以调用工具（记笔记/设提醒等）。工具提取用便宜模型。
+  </div>
+
+  <div class="group">
+    <label>工具提取服务商</label>
+    <select id="sel-tool-provider">
+      <option>同对话服务商</option>
+      <option>deepseek</option>
+      <option>openai</option>
+      <option>gemini</option>
+      <option>custom_openai</option>
+    </select>
+    <div style="font-size:11px;color:#999;margin-top:2px;">选"同对话"则工具提取复用对话模型，选别的可以用超便宜模型</div>
+  </div>
+
+  <div class="group">
+    <label>工具提取模型（可选，留空则用对话模型）</label>
+    <input id="inp-tool-model" type="text" placeholder="deepseek-v4-flash">
+  </div>
+
   <!-- ===== 角色 ===== -->
   <div class="section-title">▸ 角色设定</div>
 

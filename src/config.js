@@ -12,7 +12,13 @@ function load() {
     return {
       api_settings: {
         provider: 'deepseek',
-        providers: {}
+        providers: {},
+        tool_provider: '',
+        tool_model: '',
+        temperature: 0.7,
+        summary_provider: '同对话服务商',
+        summary_interval: 5,
+        max_history_length: 10,
       },
       character_settings: {
         name: '七夜',
