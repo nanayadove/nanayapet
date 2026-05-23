@@ -1,101 +1,127 @@
+/* ===== style.css — 宠物窗口样式 ===== */
+/*
+ * CSS 基础概念：
+ *   选择器 { 属性: 值; }
+ *   #id    — ID 选择器（如 #bubble）
+ *   .class — 类选择器（如 .show）
+ *   *      — 通配选择器（选中所有元素）
+ *
+ * 关键 CSS 属性：
+ *   display: flex         — 弹性盒布局
+ *   flex-direction: column — 纵向排列
+ *   flex: 1               — 占满剩余空间
+ *   position              — 定位方式
+ *   margin/padding        — 外边距/内边距
+ *   border-radius         — 圆角
+ *   rgba(r, g, b, a)      — 颜色 + 透明度（a 是 0~1）
+ *   pointer-events: none  — 元素不响应鼠标事件（可穿透点击）
+ *   user-select: none     — 禁止选中文本
+ *   overflow: hidden      — 溢出隐藏
+ *   object-fit: contain   — 图片按比例缩放完全显示
+ *   word-wrap: break-word — 长单词自动换行
+ */
+
 * {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  user-select: none;
+  margin: 0;           /* 清除默认外边距 */
+  padding: 0;          /* 清除默认内边距 */
+  box-sizing: border-box;  /* 宽高包含边框和内边距 */
+  user-select: none;   /* 禁止用户选中文本 */
 }
 
 body {
   width: 320px;
   height: 650px;
-  background: transparent;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  font-family: "Microsoft YaHei", sans-serif;
-  overflow: hidden;
+  background: transparent;  /* 透明背景（Electron 窗口透明必须） */
+  display: flex;            /* 弹性盒：子元素可以灵活排列 */
+  flex-direction: column;   /* 纵向排列：从上到下 */
+  align-items: center;      /* 水平居中 */
+  font-family: "Microsoft YaHei", sans-serif;  /* 微软雅黑字体 */
+  overflow: hidden;         /* 隐藏超出窗口的内容 */
 }
 
-/* ===== 弹性空间：把底部内容推下去 ===== */
+/* ===== 弹性占位空间 ===== */
+/* flex: 1 让这个 div 占满所有可用的纵向空间，把实际内容推到窗口底部 */
 .spacer {
   flex: 1;
 }
 
-/* ===== 顶部按钮栏（在气泡正上方） ===== */
+/* ===== 顶部按钮栏 ===== */
 #top-bar {
   width: 300px;
-  display: flex;
-  gap: 4px;
+  display: flex;    /* 横向排列 */
+  gap: 4px;         /* 子元素间距 */
   margin-bottom: 5px;
 }
 
 #top-bar span {
-  flex: 1;
+  flex: 1;          /* span 占满剩余空间，按钮被推到右边 */
 }
 
 .top-btn {
   width: 30px;
   height: 30px;
   border: none;
-  border-radius: 15px;
-  cursor: pointer;
+  border-radius: 15px;  /* 圆形按钮：border-radius = 高度的一半 */
+  cursor: pointer;      /* 鼠标悬停变手型 */
   font-size: 16px;
-  background: rgba(100, 100, 100, 200);
+  background: rgba(100, 100, 100, 0.8);  /* 半透明灰色 */
   color: white;
-  flex-shrink: 0;
+  flex-shrink: 0;     /* 不被压缩 */
 }
 
+/* :hover — 伪类选择器，鼠标悬停时生效 */
 .top-btn:hover {
-  background: rgba(150, 150, 150, 255);
+  background: rgba(150, 150, 150, 0.9);
 }
 
 .top-btn.close {
-  background: rgba(255, 100, 100, 200);
+  background: rgba(255, 100, 100, 0.8);  /* 红色 */
   font-weight: bold;
 }
 
 .top-btn.close:hover {
-  background: rgba(255, 50, 50, 255);
+  background: rgba(255, 50, 50, 0.9);
 }
 
 /* ===== 聊天气泡 ===== */
 #bubble {
   width: 300px;
-  background: rgba(255, 255, 255, 200);
+  background: rgba(255, 255, 255, 0.85);  /* 半透明白色 */
   border-radius: 10px;
   padding: 10px;
   color: black;
   font-size: 14px;
   text-align: center;
-  word-wrap: break-word;
+  word-wrap: break-word;  /* 长文本自动换行 */
   margin-bottom: 5px;
   min-height: 30px;
   max-height: 200px;
-  overflow-y: auto;
-  display: none;
+  overflow-y: auto;       /* 内容超出时竖向滚动 */
+  display: none;          /* 默认隐藏 */
   line-height: 1.5;
 }
 
+/* 当 JS 添加 .show 类时显示气泡 */
 #bubble.show {
   display: block;
 }
 
-/* ===== 角色立绘 ===== */
+/* ===== 角色立绘区域 ===== */
 #image-area {
   width: 300px;
   height: 440px;
   display: flex;
-  justify-content: center;
-  align-items: center;
+  justify-content: center;  /* 水平居中 */
+  align-items: center;      /* 垂直居中 */
   margin-bottom: 5px;
-  -webkit-app-region: drag;
+  -webkit-app-region: drag; /* Electron 特有：该区域可拖拽窗口 */
 }
 
 #pet-image {
   max-width: 100%;
   max-height: 100%;
-  object-fit: contain;
-  pointer-events: none;
+  object-fit: contain;      /* 图片按比例缩放，不裁剪 */
+  pointer-events: none;     /* 不响应鼠标事件（让拖拽可以穿透） */
   border-radius: 16px;
 }
 
@@ -103,17 +129,18 @@ body {
 #input-field {
   width: 300px;
   height: 40px;
-  background: rgba(255, 255, 255, 230);
+  background: rgba(255, 255, 255, 0.9);  /* 半透明白色 */
   border: none;
   border-radius: 5px;
   padding: 5px 10px;
   color: black;
   font-size: 14px;
   font-family: "Microsoft YaHei", sans-serif;
-  outline: none;
+  outline: none;            /* 去掉聚焦时的蓝色轮廓 */
   margin-bottom: 10px;
 }
 
+/* ::placeholder — 伪元素选择器，设置输入框占位文字的样式 */
 #input-field::placeholder {
   color: #888;
 }

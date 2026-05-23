@@ -53,23 +53,86 @@
 - [x] 设置界面支持工具提取模型配置（服务商 + 模型选择）
 - [x] LLM 响应格式统一处理（reply + emotion + completed_tasks）
 
-### 新增文件
-- `src/tools.js` — 工具执行引擎（write_file / read_file / schedule）
-- `src/tool-prompt.js` — 工具提取模型提示词模板
+## 🐛 已修复问题
 
-### 修改文件
-- `src/db.js` — 新增 `tools` 表 + CRUD
-- `src/llm.js` — 两步推理架构 + sendSystemMessage + completed_tasks 处理
-- `main.js` — 定时提醒改调 LLM + 降级策略
-- `preload.js` — 新 IPC 桥接通道
-- `src/renderer.js` — 主动提醒支持 LLM 回复格式
-- `src/settings.html` / `src/settings.js` — 工具模型配置 UI
-- `src/config.js` — 默认配置含工具模型字段
-- `src/index.html` — 初始文本动态化
+- [x] CSS rgba() 透明度值修正（0-255 量纲 → 0-1 范围）
+- [x] tools.js `label || label` 回退表达式改为 `label || content.slice(0, 50)`
+- [x] 设置窗口宽度统一（CSS 520px → 窗口 560px）
+- [x] Electron GPU 缓存权限错误（禁用 disk shader cache）
+- [x] max_history_length UI 上限从 100 提升到 500
+- [x] 启动批处理文件名乱码修复
+- [x] API Key 加密存储（safeStorage + `__enc__:` 前缀）
+- [x] 全项目代码添加中文注释（解释所有库和 JS 概念）
 
-## 🔜 阶段三：增强交互 [待定]
+## 🔜 阶段三：增强交互 [进行中]
 
-- [ ] 定时触发主动搭话（低活跃度定时器，宠物主动找主人聊天）
+### 3.1 主动搭话系统 [已完成]
+宠物不再只是被动回复，支持两种触发方式：
+
+#### 启动问候（离线间隔检测）
+- 记录每次关闭时间 → 重新打开时检测间隔
+- 超过 `gap_hours` 阈值（默认 6 小时）→ LLM 生成角色语气问候
+- 用户发言时更新活跃时间
+
+#### 运行时概率搭话（递增式）
+- 每 `idle_interval_minutes` 分钟（默认 10）检测一次
+- `idle_base_probability` 基础概率（默认 15%）
+- 可开启 `idle_escalation_enabled` 概率递增：
+  - 每次检测未触发时，概率自动 +`idle_escalation_increment`（默认 +10%）
+  - 触发后立即重置回基础概率
+  - 用户发言时重置回基础概率
+- 上限 95%，保证迟早会触发
+
+```
+定时器每 N 分钟触发
+  │
+  ├─ 用户最近活跃? → 跳过
+  │
+  ├─ 掷骰子 Math.random() < 当前概率?
+  │   ├─ 是 → LLM 生成搭话 → 推送显示 → 概率重置
+  │   └─ 否 → 递增? → 概率 += increment → 上限 0.95
+  │
+  └─ 用户发言时: idleProbability = baseProbability
+```
+
+- [x] 概率递增主动搭话
+- [x] 配置项: 间隔、基础概率、递增开关、递增幅度
+- [x] 长时间离开问候
+
+### 3.2 web_search 工具
+给工具引擎加入搜索能力，宠物可以帮查资料。
+
+#### 方案
+- 使用免费 API：DuckDuckGo Instant Answer API（无需 Key、无需注册）
+- 新增 `search` 工具，参数 `{ query: "搜索关键词" }`
+- 搜索结果注入对话上下文，LLM 用自己的语气转述
+
+#### 适用场景
+- "今天天气怎么样" → 搜索 → 角色语气播报
+- "帮我查一下 Python 怎么读 CSV" → 搜索 → 角色语气解释
+- "最近有什么热门游戏" → 搜索 → 角色语气吐槽
+
+#### 注意
+- 需要在 tool-prompt 里教 LLM 判断何时需要搜索
+- 搜索结果仅作为参考注入，不直接显示给用户
+- 避免角色设定冲突（猫娘说"吾辈不联网" → "哼，破例帮你查一下"）
+
+## 🔮 阶段四：视觉升级
+- [ ] Live2D / Live2D Cubism Web SDK 接入调研
+  - 免费模型资源：Free Live2D Model Collection、社区免费配布
+  - 技术路线：Live2D Cubism SDK for Web → 替换现有 PNG 立绘
+  - 复杂度评估：需引入 SDK、模型文件加载、表情/动作映射
+  - 备选方案：CSS Spritesheet 帧动画（低配版，零依赖）
 - [ ] 历史对话语义搜索（RAG 检索旧记忆）
-- [ ] 立绘动画/GIF 支持
-- [ ] 更多工具（web_search、天气查询等）
+  - 需要 embedding 模型 + 向量存储
+  - 成本较高，建议等用户量上去后再做
+
+---
+
+### 阶段三实施建议
+
+```
+优先级 1: 主搭话闲置检测（运行中 N 分钟不说话主动搭话）
+优先级 2: 主搭话上下文感知（待办到期时加提醒语气）
+优先级 3: web_search 工具（独立模块，随时可做）
+```

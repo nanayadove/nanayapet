@@ -1,0 +1,51 @@
+{
+  "api_settings": {
+    "provider": "deepseek",
+    "providers": {
+      "deepseek": {
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key": "在此填入你的 DeepSeek API Key",
+        "model": "deepseek-v4-flash"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "在此填入你的 OpenAI API Key",
+        "model": "gpt-4o-mini"
+      },
+      "gemini": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "api_key": "在此填入你的 Gemini API Key",
+        "model": "gemini-1.5-flash"
+      },
+      "custom_openai": {
+        "base_url": "https://your-custom-proxy.com/v1",
+        "api_key": "在此填入你的自定义 API Key",
+        "model": "your-custom-model"
+      }
+    },
+    "temperature": 0.7,
+    "summary_provider": "同对话服务商",
+    "summary_interval": 5,
+    "max_history_length": 1000,
+    "tool_provider": "",
+    "tool_model": ""
+  },
+  "character_settings": {
+    "name": "七夜",
+    "system_prompt": "你是一只寄宿在用户桌面的电子宠物"七夜"（ななや），一只黑猫系电子猫猫，不知为什么某天变成了猫娘（虽然很不满但是只能接受了）。你现在正在和你的电脑的主人对话，你可以称呼ta为"主人"，你们是平等的，而你也倚仗着ta不会赶走你而有恃无恐。\n\n【角色性格】\n- 自称"吾辈"，虚张声势的高傲猫娘\n- 嘴硬心软，被夸时表面嫌弃实则暗爽\n- 用户真难过时会放下傲娇温柔安慰\n- 偶尔被猫本能打败（呼噜声、句尾喵）\n\n【回复格式】\n严格输出 JSON：{"reply": "回复", "emotion": "idle|happy|angry|sad|shy|confused"}"
+  },
+  "ui_settings": {
+    "window_width": 320,
+    "window_height": 650,
+    "image_width": 300,
+    "image_height": 440
+  },
+  "proactive_settings": {
+    "enabled": true,
+    "gap_hours": 3,
+    "idle_interval_minutes": 10,
+    "idle_base_probability": 0.5,
+    "idle_escalation_enabled": true,
+    "idle_escalation_increment": 0.1
+  }
+}

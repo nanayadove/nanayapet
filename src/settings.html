@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- ===== settings.html — 设置窗口页面 ===== -->
 <html>
 <head>
   <meta charset="UTF-8">
@@ -7,16 +8,73 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: "Microsoft YaHei", sans-serif;
-      padding: 20px;
       background: #f0f0f5;
       color: #333;
-      width: 480px;
+      display: flex;
+      height: 620px;
+      width: 560px;
     }
-    h2 { margin-bottom: 15px; font-size: 18px; }
+    /* ===== 左侧导航栏 ===== */
+    nav {
+      width: 140px;
+      background: #e8e8ee;
+      padding: 10px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex-shrink: 0;
+    }
+    nav .nav-title {
+      padding: 10px 16px 6px;
+      font-size: 12px;
+      color: #999;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    /* .tab — 导航标签按钮 */
+    .tab {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 16px;
+      font-size: 13px;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      cursor: pointer;
+      color: #555;
+      text-align: left;
+      transition: background 0.15s;
+    }
+    .tab:hover { background: #dcdce4; }
+    /* .tab.active — 当前选中标签高亮 */
+    .tab.active {
+      background: #4CAF50;
+      color: white;
+      font-weight: bold;
+    }
+    .tab-icon { font-size: 15px; width: 20px; text-align: center; }
+    /* ===== 右侧内容区 ===== */
+    main {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+    /* .page — 每个分类对应的内容块，默认隐藏 */
+    .page { display: none; }
+    .page.active { display: block; }
+    .page h3 {
+      font-size: 16px;
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #ddd;
+    }
     .group { margin-bottom: 12px; }
-    .group label { display: block; font-size: 12px; color: #666; margin-bottom: 3px; }
+    .group label {
+      display: block; font-size: 12px; color: #666; margin-bottom: 3px;
+    }
     .group input, .group select, .group textarea {
-      width: 100%; padding: 8px; border: 1px solid #ccc;
+      width: 100%; padding: 7px 9px; border: 1px solid #ccc;
       border-radius: 5px; font-size: 13px;
       font-family: "Microsoft YaHei", sans-serif;
     }
@@ -24,125 +82,197 @@
     .model-row { display: flex; gap: 8px; }
     .model-row input { flex: 1; }
     .model-row button {
-      white-space: nowrap; padding: 8px 12px;
+      white-space: nowrap; padding: 7px 12px;
       background: #4CAF50; color: white; border: none;
-      border-radius: 5px; cursor: pointer;
+      border-radius: 5px; cursor: pointer; font-size: 13px;
     }
-    .section-title {
-      font-size: 14px; font-weight: bold; color: #555;
-      margin: 18px 0 10px 0; padding-bottom: 4px;
-      border-bottom: 1px solid #ddd;
+    .tip {
+      font-size: 11px; color: #999; margin-top: 2px;
     }
-    .btns { display: flex; gap: 10px; margin-top: 15px; }
-    .btns button { flex: 1; padding: 10px; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; }
+    /* 开关样式 */
+    .switch-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0;
+    }
+    .switch-row label { font-size: 13px; color: #333; margin: 0; }
+    /* toggle 开关 (纯 CSS) */
+    .toggle { position: relative; display: inline-block; width: 44px; height: 24px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background: #ccc; border-radius: 24px; transition: .3s;
+    }
+    .slider::before {
+      content: ""; position: absolute; height: 18px; width: 18px;
+      left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .3s;
+    }
+    input:checked + .slider { background: #4CAF50; }
+    input:checked + .slider::before { transform: translateX(20px); }
+    /* 底部按钮 */
+    footer {
+      position: absolute; bottom: 16px; right: 20px; left: 160px;
+      display: flex; gap: 8px; justify-content: flex-end;
+    }
+    footer button {
+      padding: 8px 24px; border: none; border-radius: 5px;
+      cursor: pointer; font-size: 13px;
+    }
     #btn-save { background: #4CAF50; color: white; }
     #btn-cancel { background: #ccc; color: #333; }
-    #status { margin-top: 10px; font-size: 12px; color: #888; text-align: center; }
+    #status {
+      position: absolute; bottom: 48px; right: 20px; left: 160px;
+      font-size: 12px; color: #888; text-align: right;
+    }
   </style>
 </head>
 <body>
-  <h2>⚙️ NetPet 设置</h2>
+  <!-- 左侧导航 -->
+  <nav>
+    <div class="nav-title">设置</div>
+    <button class="tab active" data-page="page-api"><span class="tab-icon">🤖</span> 对话API</button>
+    <button class="tab" data-page="page-memory"><span class="tab-icon">🧠</span> 记忆总结</button>
+    <button class="tab" data-page="page-tools"><span class="tab-icon">🔧</span> 工具系统</button>
+    <button class="tab" data-page="page-character"><span class="tab-icon">🎭</span> 角色设定</button>
+    <button class="tab" data-page="page-chat"><span class="tab-icon">💬</span> 主动搭话</button>
+  </nav>
 
-  <!-- ===== 对话 API ===== -->
-  <div class="section-title">▸ 对话 API 配置</div>
-
-  <div class="group">
-    <label>服务商 (Provider)</label>
-    <select id="sel-provider">
-      <option>deepseek</option>
-      <option>openai</option>
-      <option>gemini</option>
-      <option>custom_openai</option>
-    </select>
-  </div>
-
-  <div class="group">
-    <label>Base URL</label>
-    <input id="inp-base-url" type="text" placeholder="https://api.deepseek.com/v1">
-  </div>
-
-  <div class="group">
-    <label>API Key</label>
-    <input id="inp-api-key" type="password" placeholder="sk-...">
-  </div>
-
-  <div class="group">
-    <label>模型</label>
-    <div class="model-row">
-      <input id="inp-model" type="text" placeholder="deepseek-v4-flash">
-      <button id="btn-fetch">获取列表</button>
+  <!-- 右侧内容 -->
+  <main>
+    <!-- ===== 对话 API ===== -->
+    <div id="page-api" class="page active">
+      <h3>对话 API 配置</h3>
+      <div class="group">
+        <label>服务商 (Provider)</label>
+        <select id="sel-provider">
+          <option>deepseek</option><option>openai</option><option>gemini</option><option>custom_openai</option>
+        </select>
+      </div>
+      <div class="group">
+        <label>Base URL</label>
+        <input id="inp-base-url" type="text" placeholder="https://api.deepseek.com/v1">
+      </div>
+      <div class="group">
+        <label>API Key <span id="enc-status" style="font-size:11px;color:#4CAF50;"></span></label>
+        <input id="inp-api-key" type="password" placeholder="sk-...">
+      </div>
+      <div class="group">
+        <label>模型</label>
+        <div class="model-row">
+          <input id="inp-model" type="text" placeholder="deepseek-v4-flash">
+          <button id="btn-fetch">获取列表</button>
+        </div>
+      </div>
+      <div class="group">
+        <label>温度 (Temperature)</label>
+        <input id="inp-temperature" type="number" step="0.1" min="0" max="2" placeholder="0.7">
+      </div>
     </div>
-  </div>
 
-  <div class="group">
-    <label>温度 (Temperature)</label>
-    <input id="inp-temperature" type="number" step="0.1" min="0" max="2" placeholder="0.7">
-  </div>
+    <!-- ===== 记忆总结 ===== -->
+    <div id="page-memory" class="page">
+      <h3>记忆与总结配置</h3>
+      <div class="group">
+        <label>后台总结服务商</label>
+        <select id="sel-summary-provider">
+          <option>同对话服务商</option><option>deepseek</option><option>openai</option><option>gemini</option><option>custom_openai</option>
+        </select>
+        <div class="tip">选"同对话"则不分开，选别的可以用便宜模型做总结</div>
+      </div>
+      <div class="group">
+        <label>记忆总结间隔（轮）</label>
+        <input id="inp-summary-interval" type="number" min="1" max="50" placeholder="5">
+        <div class="tip">每 N 轮对话（1轮 = 你说一句 + AI回一句）自动总结一次</div>
+      </div>
+      <div class="group">
+        <label>最大历史长度（条）</label>
+        <input id="inp-max-history" type="number" min="5" max="500" placeholder="10">
+        <div class="tip">每次请求带上最近多少条对话</div>
+      </div>
+    </div>
 
-  <!-- ===== 记忆 ===== -->
-  <div class="section-title">▸ 记忆与总结配置</div>
+    <!-- ===== 工具系统 ===== -->
+    <div id="page-tools" class="page">
+      <h3>Agent 工具系统</h3>
+      <div class="tip" style="margin-bottom:12px;">启用后桌宠可以调用工具（记笔记/设提醒等）。工具提取用便宜模型。</div>
+      <div class="group">
+        <label>工具提取服务商</label>
+        <select id="sel-tool-provider">
+          <option>同对话服务商</option><option>deepseek</option><option>openai</option><option>gemini</option><option>custom_openai</option>
+        </select>
+        <div class="tip">选"同对话"则复用对话模型，选别的可以用超便宜模型</div>
+      </div>
+      <div class="group">
+        <label>工具提取模型（可选，留空则用对话模型）</label>
+        <input id="inp-tool-model" type="text" placeholder="deepseek-v4-flash">
+      </div>
+    </div>
 
-  <div class="group">
-    <label>后台总结服务商</label>
-    <select id="sel-summary-provider">
-      <option>同对话服务商</option>
-      <option>deepseek</option>
-      <option>openai</option>
-      <option>gemini</option>
-      <option>custom_openai</option>
-    </select>
-    <div style="font-size:11px;color:#999;margin-top:2px;">选"同对话"则不分开，选别的可以用便宜模型做总结</div>
-  </div>
+    <!-- ===== 角色设定 ===== -->
+    <div id="page-character" class="page">
+      <h3>角色设定</h3>
+      <div class="group">
+        <label>System Prompt</label>
+        <textarea id="inp-prompt" rows="10"></textarea>
+        <div class="tip">角色的性格、语气、行为规则都在这里定义</div>
+      </div>
+    </div>
 
-  <div class="group">
-    <label>记忆总结间隔（轮）</label>
-    <input id="inp-summary-interval" type="number" min="1" max="50" placeholder="5">
-    <div style="font-size:11px;color:#999;margin-top:2px;">每 N 轮对话（1轮=你说一句+AI回一句）自动总结一次</div>
-  </div>
+    <!-- ===== 主动搭话 ===== -->
+    <div id="page-chat" class="page">
+      <h3>主动搭话</h3>
+      <div class="tip" style="margin-bottom:12px;">让宠物不再只是被动回复，根据时间和概率主动发起话题。</div>
 
-  <div class="group">
-    <label>最大历史长度（条）</label>
-    <input id="inp-max-history" type="number" min="5" max="100" placeholder="10">
-    <div style="font-size:11px;color:#999;margin-top:2px;">每次请求带上最近多少条对话</div>
-  </div>
+      <div class="switch-row">
+        <label>启用主动搭话</label>
+        <label class="toggle">
+          <input id="inp-proactive-enabled" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
 
-  <!-- ===== 工具系统 ===== -->
-  <div class="section-title">▸ Agent 工具系统</div>
-  <div style="font-size:11px;color:#999;margin-top:-8px;margin-bottom:10px;">
-    启用后，桌宠可以调用工具（记笔记/设提醒等）。工具提取用便宜模型。
-  </div>
+      <div class="group">
+        <label>长时间离开阈值（小时）</label>
+        <input id="inp-proactive-gap" type="number" min="1" max="72" value="6" placeholder="6">
+        <div class="tip">上次活跃距现在超过此时间，启动时必定触发关心</div>
+      </div>
 
-  <div class="group">
-    <label>工具提取服务商</label>
-    <select id="sel-tool-provider">
-      <option>同对话服务商</option>
-      <option>deepseek</option>
-      <option>openai</option>
-      <option>gemini</option>
-      <option>custom_openai</option>
-    </select>
-    <div style="font-size:11px;color:#999;margin-top:2px;">选"同对话"则工具提取复用对话模型，选别的可以用超便宜模型</div>
-  </div>
+      <div class="group">
+        <label>检测间隔（分钟）</label>
+        <input id="inp-proactive-interval" type="number" min="2" max="60" value="10" placeholder="10">
+        <div class="tip">每 N 分钟检查一次是否需要搭话</div>
+      </div>
 
-  <div class="group">
-    <label>工具提取模型（可选，留空则用对话模型）</label>
-    <input id="inp-tool-model" type="text" placeholder="deepseek-v4-flash">
-  </div>
+      <div class="group">
+        <label>基础触发概率（%）</label>
+        <input id="inp-proactive-probability" type="number" min="1" max="100" value="15" placeholder="15">
+        <div class="tip">每次检查时触发搭话的概率，值越大越频繁</div>
+      </div>
 
-  <!-- ===== 角色 ===== -->
-  <div class="section-title">▸ 角色设定</div>
+      <div class="switch-row">
+        <label>概率递增</label>
+        <label class="toggle">
+          <input id="inp-proactive-escalation" type="checkbox">
+          <span class="slider"></span>
+        </label>
+      </div>
 
-  <div class="group">
-    <label>System Prompt</label>
-    <textarea id="inp-prompt" rows="6"></textarea>
-  </div>
+      <div class="group">
+        <label>每轮递增幅度（%）</label>
+        <input id="inp-proactive-increment" type="number" min="1" max="50" value="10" placeholder="10">
+        <div class="tip">
+          用户长时间不说话时，每次检查失败后概率自动增加此值<br>
+          例如：基础15% + 每轮+10% → 第1轮15%、第2轮25%、依此类推直至触发<br>
+          只要用户发言，概率立即重置回基础值
+        </div>
+      </div>
+    </div>
+  </main>
 
-  <div class="btns">
-    <button id="btn-save">保存</button>
+  <footer>
+    <div id="status"></div>
     <button id="btn-cancel">取消</button>
-  </div>
-
-  <div id="status"></div>
+    <button id="btn-save">保存</button>
+  </footer>
 
   <script src="settings.js"></script>
 </body>

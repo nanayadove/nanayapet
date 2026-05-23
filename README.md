@@ -1,5 +1,7 @@
 # NetPet - 桌面LLM虚拟宠物
 
+> v1.1.0
+
 基于 Electron + JavaScript 的桌面 AI 宠物框架。通过在本地直接调用大语言模型 (LLM) API，打造属于你自己的 AI 桌面伙伴。
 
 无论是傲娇猫娘、沉稳大叔还是冷酷杀手，只需修改 System Prompt，即可完美适配。
@@ -14,6 +16,7 @@
 - **Agent 工具系统**：两步推理架构，LLM 可调用工具（记笔记/设提醒/查询）
 - **AI 驱动任务管理**：LLM 自动判断任务是否完成，无需硬编码关键词匹配
 - **角色语气提醒**：定时提醒走 LLM 生成，用角色自己的语气说出来
+- **主动搭话系统**：支持启动问候 + 运行时概率递增搭话，宠物会主动找用户聊天
 
 ## Agent 工具系统
 
@@ -35,6 +38,11 @@
 - `read_file` — 按类型/标签/全文搜索回顾已记录内容
 - `schedule` — 设置定时提醒（自然语言时间或ISO时间），到期调LLM生成角色语气提醒
 
+### 主动搭话系统
+- **启动问候**：检测离线间隔，超过阈值自动生成角色语气问候
+- **运行时概率搭话**：可配置间隔/基础概率/递增机制，宠物随机主动发起对话
+- 用户发言时概率自动重置，避免连续打扰
+
 ### 任务完成判断
 不再使用独立的 `complete_task` 工具。待办/提醒列表动态注入到对话上下文中，LLM 根据聊天内容自行判断任务是否完成，在回复的 `completed_tasks` 数组中返回对应 ID，后端自动标记数据库。
 
@@ -51,12 +59,18 @@ npm install
 
 ### 2. 配置
 
-编辑 `config.json`，填入你的 API Key：
+复制模板并填入你的 API Key：
+
+```bash
+copy config.example.json config.json
+```
+
+然后编辑 `config.json`，填入你的 API Key：
 
 ```json
 "deepseek": {
     "base_url": "https://api.deepseek.com/v1",
-    "api_key": "***",
+    "api_key": "你的API-Key",
     "model": "deepseek-v4-flash"
 }
 ```
@@ -84,10 +98,11 @@ npm run dev
 
 ```
 netpet/
-├── main.js              # Electron 主进程（窗口管理 + IPC + 定时提醒检查）
+├── main.js              # Electron 主进程（窗口管理 + IPC + 定时器）
 ├── preload.js           # IPC 桥接
-├── config.json          # 配置（API Key、角色设定、UI尺寸）
-├── memory.db            # SQLite 对话数据库
+├── config.json          # 用户配置（需从 config.example.json 复制）
+├── config.example.json  # 配置模板（不含敏感信息，可安全提交）
+├── memory.db            # SQLite 对话数据库（本地生成，不入库）
 ├── src/
 │   ├── index.html       # 宠物窗口 UI
 │   ├── style.css        # UI 样式
@@ -95,11 +110,15 @@ netpet/
 │   ├── settings.html    # 设置窗口 UI
 │   ├── settings.js      # 设置窗口逻辑
 │   ├── settings-preload.js # 设置窗口 IPC 桥接
-│   ├── config.js        # 配置读写
+│   ├── config.js        # 配置读写 + API Key 加密存储
 │   ├── llm.js           # LLM 通信核心（两步推理架构）
-│   ├── tools.js         # 工具执行引擎
 │   ├── tool-prompt.js   # 工具提取模型提示词模板
-│   └── db.js            # SQLite 记忆存储 + 工具 CRUD
+│   ├── db.js            # SQLite 记忆存储 + 工具 CRUD
+│   └── tools/           # 工具模块
+│       ├── index.js     # 工具路由
+│       ├── write-file.js
+│       ├── read-file.js
+│       └── schedule.js
 ├── assets/              # 立绘素材 (PNG)
 ├── 启动桌宠.bat         # 一键启动
 ├── ROADMAP.md           # 演进路线图

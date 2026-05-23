@@ -1,18 +1,129 @@
+// ===== config.js — 配置文件读写 =====
+//
+// 负责读取和写入 config.json 配置文件。
+//
+// 关键功能：
+//   1. load() — 读取 config.json 并解密 API Key（只存在于内存中）
+//   2. save() — 加密 API Key 后写入 config.json（磁盘上永远加密）
+//
+// 用到的 Node.js 内置模块：
+//   fs (File System) — 读写文件
+//   path — 拼接文件路径
+//
+// 用到的 Electron API：
+//   safeStorage — 操作系统级加密（Windows DPAPI / macOS Keychain / Linux libsecret）
+//     encryptString(明文) → Buffer（加密后的字节）
+//     decryptString(Buffer) → 明文
+//     isEncryptionAvailable() → 系统是否支持加密
+
 const fs = require('fs')
 const path = require('path')
 
+// path.join() 把参数拼成完整路径
+// __dirname 是当前文件目录，'..' 是上一级，最终指向项目根目录的 config.json
 const CONFIG_PATH = path.join(__dirname, '..', 'config.json')
+
+// 保存 safeStorage 实例的引用（由 main.js 在启动时传入）
+let safeStorage = null
+
+// ================================================================
+// 初始化
+// ================================================================
+
+// init(ss) — 接收 Electron 的 safeStorage 实例
+// main.js 在启动时调用 config.init(safeStorage)
+function init(ss) {
+  safeStorage = ss
+}
+
+// isEncryptionAvailable() — 检查当前操作系统是否支持安全加密存储
+// !! 是双非运算符，把值强制转成布尔值（truthy → true, falsy → false）
+function isEncryptionAvailable() {
+  return !!(safeStorage && safeStorage.isEncryptionAvailable())
+}
+
+// ================================================================
+// 加密 / 解密
+// ================================================================
+
+// encryptKey(明文) — 加密单条 API Key
+// 加密后的格式：'__enc__:' + base64(加密字节)
+// 存到 config.json 里大概是 "__enc__:dGhpcyBpcyBh...==" 这样
+function encryptKey(plainKey) {
+  if (!plainKey) return plainKey
+  // 如果系统不支持加密，退回明文存储
+  if (!safeStorage || !safeStorage.isEncryptionAvailable()) return plainKey
+  // 已经加密过的不用重复加密（以 '__enc__:' 开头）
+  if (plainKey.startsWith('__enc__:')) return plainKey
+  // safeStorage.encryptString(字符串) → Buffer
+  // .toString('base64') 把 Buffer 转成 Base64 字符串（方便存在 JSON 里）
+  const encrypted = safeStorage.encryptString(plainKey)
+  return '__enc__:' + encrypted.toString('base64')
+}
+
+// decryptKey(存储值) — 解密单条 API Key
+// 如果存储值不是 '__enc__:' 开头，就是明文（旧格式），直接返回
+function decryptKey(stored) {
+  if (!stored) return stored
+  // 判断是否加密格式：不以 '__enc__:' 开头说明是旧明文
+  if (!stored.startsWith('__enc__:')) return stored
+  if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
+    console.warn('[Config] safeStorage 不可用，无法解密 API Key')
+    return ''
+  }
+  // .slice(8) 去掉前缀 '__enc__:'（8个字符）
+  // Buffer.from(b64, 'base64') 把 Base64 字符串恢复成 Buffer
+  // safeStorage.decryptString(Buffer) 解密得到明文
+  const b64 = stored.slice(8)
+  const buf = Buffer.from(b64, 'base64')
+  return safeStorage.decryptString(buf)
+}
+
+// 批量解密配置中所有 provider 的 api_key
+function decryptProviders(config) {
+  // 可选链 ?. 安全访问：防止 config 或 api_settings 为 undefined
+  const providers = config?.api_settings?.providers
+  if (!providers) return
+  // Object.keys(obj) — 返回对象所有键名组成的数组
+  for (const name of Object.keys(providers)) {
+    if (providers[name].api_key) {
+      // 直接修改对象属性（对象是引用传递）
+      providers[name].api_key = decryptKey(providers[name].api_key)
+    }
+  }
+}
+
+// 批量加密配置中所有 provider 的 api_key
+function encryptProviders(config) {
+  const providers = config?.api_settings?.providers
+  if (!providers) return
+  for (const name of Object.keys(providers)) {
+    if (providers[name].api_key) {
+      providers[name].api_key = encryptKey(providers[name].api_key)
+    }
+  }
+}
+
+// ================================================================
+// 读取
+// ================================================================
 
 function load() {
   try {
+    // fs.readFileSync(路径, 编码) — 同步读取整个文件内容为字符串
     const raw = fs.readFileSync(CONFIG_PATH, 'utf-8')
-    return JSON.parse(raw)
+    // JSON.parse(字符串) — 把 JSON 字符串转成 JS 对象
+    const config = JSON.parse(raw)
+    // 解密所有 API Key（只影响内存中的对象，不修改磁盘文件）
+    decryptProviders(config)
+    return config
   } catch (err) {
     console.error('配置文件读取失败:', err.message)
+    // 读取失败时返回默认配置
     return {
       api_settings: {
         provider: 'deepseek',
-        providers: {},
+        providers: {},          // 空的 provider 列表
         tool_provider: '',
         tool_model: '',
         temperature: 0.7,
@@ -29,26 +140,81 @@ function load() {
         window_height: 650,
         image_width: 300,
         image_height: 440
+      },
+      proactive_settings: {
+        enabled: true,
+        gap_hours: 6,
+        idle_interval_minutes: 10,
+        idle_base_probability: 0.15,
+        idle_escalation_enabled: false,
+        idle_escalation_increment: 0.10,
       }
     }
   }
 }
 
+// ================================================================
+// 迁移（旧明文 → 新加密）
+// ================================================================
+
+// needsMigration() — 检查磁盘上的 config.json 是否还有明文 API Key
+// 直接读文件（不走 load()，load 会把解密的也当明文），检查是否有未加密的 key
+function needsMigration() {
+  if (!isEncryptionAvailable()) return false
+  try {
+    const raw = fs.readFileSync(CONFIG_PATH, 'utf-8')
+    const onDisk = JSON.parse(raw)
+    const providers = onDisk?.api_settings?.providers || {}
+    // Object.values(obj) — 返回对象所有值组成的数组
+    // .some(fn) — 数组方法，至少有一个元素满足回调条件就返回 true
+    return Object.values(providers).some(
+      p => p.api_key && !p.api_key.startsWith('__enc__:') && p.api_key !== '***'
+    )
+  } catch {
+    return false
+  }
+}
+
+// migrate() — 执行迁移：加载→加密→存盘
+function migrate() {
+  const config = load()
+  save(config)
+}
+
+// ================================================================
+// 保存
+// ================================================================
+
+// save(config) — 合并并保存配置到磁盘
+// 参数 config 是来自设置窗口的新配置（可能只包含部分字段）
+// 需要和磁盘上的现有配置合并，避免丢失未修改的字段
 function save(config) {
-  // 合并：保留原有配置中没被覆盖的字段
+  // load() 会解密，所以 current 里的 key 是明文
   const current = load()
+  // 展开运算符 ... — 把对象的属性复制到新对象
+  // { ...current, ...config } 效果：后面的覆盖前面的同名属性
   const merged = { ...current, ...config }
-  // 确保 providers 不丢失已有数据
+  // providers 需要特殊合并：保留所有 provider，只更新修改的那一个
   if (config.api_settings?.providers) {
     merged.api_settings = merged.api_settings || {}
     merged.api_settings.providers = {
+      // 先把旧的 providers 铺开
       ...(current.api_settings?.providers || {}),
+      // 再把新的 providers 铺开（同名 key 会覆盖旧的）
       ...config.api_settings.providers
     }
+    // 同步更新当前选中的 provider 名称
     merged.api_settings.provider = config.api_settings.provider
   }
+  // 写入前加密所有 API Key
+  encryptProviders(merged)
+  // JSON.stringify(obj, null, 2) — 把 JS 对象转成 JSON 字符串
+  // null 是不需要转换函数，2 是缩进空格数（美化格式）
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf-8')
   return merged
 }
 
-module.exports = { load, save }
+// module.exports — Node.js 模块导出
+// 键值对：{ 对外名称: 本地函数 }
+// 其他文件 require('./config') 后可以调用 config.load()、config.save() 等
+module.exports = { init, load, save, isEncryptionAvailable, needsMigration, migrate }

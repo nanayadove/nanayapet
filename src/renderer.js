@@ -1,27 +1,44 @@
-// ===== 页面元素 =====
-// document.getElementById 是浏览器提供的 API，通过 HTML 元素的 id 找到它
+// ===== renderer.js — 宠物窗口前端逻辑 =====
+//
+// 这个文件在渲染进程（网页环境）中运行，可以访问浏览器 DOM API，
+// 但不能直接访问 Node.js 或 Electron 的内部 API。
+// 要通过 window.api（preload.js 暴露）和主进程通信。
+//
+// 浏览器 DOM API 速查：
+//   document.getElementById(id)     — 按 ID 获取页面元素
+//   element.textContent = '文本'     — 设置元素的纯文本内容
+//   element.style.属性 = '值'        — 设置 CSS 样式
+//   element.classList.add('类名')   — 添加 CSS 类
+//   element.addEventListener(事件, fn) — 注册事件监听
+//   element.src = '路径'             — 设置图片的源路径
+
+// ===== 获取页面元素 =====
+// document.getElementById() — 浏览器内置方法，通过 HTML 中元素的 id 属性找到它
+// 如果找不到返回 null
 const bubble = document.getElementById('bubble')
 const petImage = document.getElementById('pet-image')
 const petImageArea = document.getElementById('image-area')
 const inputField = document.getElementById('input-field')
 const topBar = document.getElementById('top-bar')
 
+// 当前情绪状态（初始 idle）
 let currentEmotion = 'idle'
-let isLoading = false  // 锁：防止用户在等待回复时连续按回车
+// isLoading 是互斥锁：用户发送消息后设为 true，收到回复后才设为 false
+// 防止用户在等待回复时连续按回车发多条消息
+let isLoading = false
 
 // ===== 启动时加载配置 =====
-// window.api.getConfig() 是通过 preload.js 暴露出来的函数
-// 它在幕后通过 Electron 的 IPC 机制，通知主进程读取 config.json
-// .then(config => { ... }) 是 Promise 的写法：等 getConfig() 返回结果后再执行
+// window.api.getConfig() — 通过 preload.js 暴露的 IPC 调用，读取配置
+// 返回 Promise（异步结果）
+// .then(config => { ... }) — Promise 成功后执行的回调
 window.api.getConfig().then(config => {
-  // 从配置读取 UI 尺寸
+  // 可选链 ?. 安全读取嵌套属性
   const ui = config.ui_settings || {}
   const imgW = ui.image_width || 300
   const imgH = ui.image_height || 440
 
-  // 把配置里的尺寸应用到页面元素上
-  // style.width 和 style.height 是 DOM 元素的 CSS 属性
-  // 加 'px' 是因为 CSS 尺寸必须带单位
+  // 把配置尺寸应用到页面元素上
+  // style.width / style.height — DOM 元素的 CSS 属性，必须带 'px' 单位
   petImageArea.style.width = imgW + 'px'
   petImageArea.style.height = imgH + 'px'
   bubble.style.width = imgW + 'px'
@@ -31,80 +48,93 @@ window.api.getConfig().then(config => {
   const name = config.character_settings?.name || '七夜喵'
   showBubble(`只是一只${name}。`)
 }).catch(() => {
-  // .catch() 是 Promise 的"失败处理"分支
-  // getConfig() 失败时（比如配置文件损坏）执行这里
-  showBubble('配置加载失败，请点击 ⚙️ 设置 API Key')
+  // .catch() — Promise 失败时的回调
+  showBubble('配置加载失败，请点击 设置 API Key')
 })
 
 // ===== 发送消息 =====
-// addEventListener('keydown', callback) 是浏览器标准事件监听
-// 当用户按下键盘键时触发，e.key 告诉你按的是哪个键
+// addEventListener('keydown', callback) — 键盘按下事件监听
+// e.key 是按下的是哪个键（'Enter'、'a'、'Escape' 等）
 inputField.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {            // 侦测到回车键
-    const text = inputField.value.trim()  // 拿到用户输入的文本，trim() 去掉首尾空格
-    if (!text || isLoading) return     // 空文本或正在加载就不处理
+  if (e.key === 'Enter') {
+    // .trim() — 去掉字符串首尾空白字符
+    const text = inputField.value.trim()
+    // 空文本或正在加载中，不处理
+    if (!text || isLoading) return
 
-    inputField.value = ''              // 清空输入框
-    showBubble('...')                  // 显示"..."告诉用户正在处理
-    isLoading = true                   // 上锁，防止重复发送
+    // 清空输入框，显示加载状态
+    inputField.value = ''
+    showBubble('...')
+    isLoading = true
 
-    // ⭐ window.api.sendMessage(text) 是调用 preload.js 暴露的函数
-    // 它背后走的是 Electron IPC 通道，把 text 传给 main.js
-    // 然后 main.js 调用 llm.sendMessage()，最终调 LLM API
-    // 整个过程是异步的——sendMessage 立即返回一个 Promise
-    // Promise 有三种状态：pending（进行中）、fulfilled（成功）、rejected（失败）
-    // .then() 处理成功，.catch() 处理失败，.finally() 不管成败最后都执行
+    // window.api.sendMessage(text) — 通过 IPC 发送消息给主进程
+    // 返回 Promise：.then() 成功 / .catch() 失败 / .finally() 无论成败都执行
     window.api.sendMessage(text)
       .then(result => {
-        // result 就是 LLM 返回的对象：{ reply: "回复文本", emotion: "情绪标签" }
+        // result = { reply: '回复文本', emotion: '情绪标签' }
         currentEmotion = result.emotion || 'idle'
         updateImage(currentEmotion)
         showBubble(result.reply)
       })
       .catch(err => {
+        // 网络错误或 API 故障时显示错误信息
         showBubble(`故障:\n${err.message}`)
         currentEmotion = 'confused'
         updateImage('confused')
       })
       .finally(() => {
-        isLoading = false  // 解锁，允许用户发下一条消息
+        // 不管成功还是失败，最后都要解锁
+        isLoading = false
       })
   }
 })
 
 // ===== 更新立绘 =====
-// emotion 参数是 LLM 返回的情绪标签：idle/happy/angry/sad/shy/confused
-// 对应 assets/ 目录下的 idle.png / happy.png / angry.png / sad.png / shy.png / confused.png
+// emotion 是 LLM 返回的情绪标签，对应 assets/ 目录下的 PNG 图片
+// idle → assets/idle.png, happy → assets/happy.png, ...
 function updateImage(emotion) {
+  // ../assets/ — 相对路径，因为 HTML 在 src/ 目录下
   petImage.src = `../assets/${emotion}.png`
+  // onerror — 图片加载失败时触发的回调
   petImage.onerror = () => {
-    // 图片加载失败时的兜底：显示文字提示
+    // alt 属性是图片加载失败时显示的替代文字
     petImage.alt = `【缺少素材: ${emotion}.png】`
   }
 }
 
-// ===== 显示气泡 =====
-// textContent 是 DOM 元素的纯文本内容（不解析 HTML）
-// classList.add('show') 给元素加上 CSS 类名，类名对应的样式控制它是否可见
+// ===== 显示聊天气泡 =====
+// textContent — 设置元素的纯文本（不会被解析为 HTML，安全）
+// classList.add('show') — 添加 CSS 类，类对应的样式控制气泡的显示/隐藏
 function showBubble(text) {
   bubble.textContent = text
   bubble.classList.add('show')
 }
 
 // ===== 关闭按钮 =====
+// window.close() — 浏览器 API，关闭当前窗口（Electron 中等于关闭窗口）
 document.getElementById('close-btn').addEventListener('click', () => {
-  window.close()  // 浏览器内置 API：关闭当前窗口
+  window.close()
 })
 
 // ===== 设置按钮 =====
+// 通知主进程打开设置窗口
 document.getElementById('settings-btn').addEventListener('click', () => {
-  window.api.openSettings()  // 通知主进程打开设置窗口
+  window.api.openSettings()
 })
 
-// ===== 定时提醒触发（主进程主动推过来的） =====
-// 提醒文本已经是 LLM 生成的，用角色的语气说出来的
-// 不需要再加 ⏰ 前缀，直接显示即可
+// ===== 定时提醒触发监听（主进程推送过来的） =====
+// 当定时提醒到期时，主进程通过 IPC 推送 schedule:triggered 事件
+// 提醒文本已经由 LLM 生成好了，直接显示即可
 window.api.onScheduleTriggered((data) => {
+  showBubble(data.reply)
+  currentEmotion = data.emotion || 'idle'
+  updateImage(currentEmotion)
+})
+
+// ===== 主动问候触发监听 =====
+// 当用户长时间离线后重新打开时，主进程通过 IPC 推送 proactive:greeting
+// data = { reply, emotion, gap } （LLM 生成的关心话语 + 间隔描述）
+window.api.onProactiveGreeting((data) => {
   showBubble(data.reply)
   currentEmotion = data.emotion || 'idle'
   updateImage(currentEmotion)
