@@ -8,6 +8,6 @@ REM electron.exe . — 运行当前目录下的 Electron 应用
 REM exit        — 退出命令窗口
 
 chcp 65001 >nul
-cd /d D:\code\netpet
+cd /d "%~dp0"
 start "" ".\node_modules\electron\dist\electron.exe" .
 exit
