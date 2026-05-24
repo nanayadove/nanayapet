@@ -64,6 +64,10 @@
       "serper": {
         "base_url": "https://google.serper.dev",
         "api_key": "在此填入你的 Serper API Key（注册: https://serper.dev）"
+      },
+      "anthropic": {
+        "base_url": "https://api.anthropic.com/v1",
+        "api_key": "在此填入你的 Anthropic API Key（注册: https://console.anthropic.com）"
       }
     }
   }

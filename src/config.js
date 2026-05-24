@@ -176,6 +176,7 @@ function load() {
           tavily: { base_url: 'https://api.tavily.com', api_key: '' },
           duckduckgo: { base_url: 'https://api.duckduckgo.com', api_key: '' },
           serper: { base_url: 'https://google.serper.dev', api_key: '' },
+          anthropic: { base_url: 'https://api.anthropic.com/v1', api_key: '' },
         }
       }
     }

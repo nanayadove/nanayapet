@@ -283,6 +283,10 @@ function updateSearchKeyHint() {
     inpSearchKey.placeholder = 'DuckDuckGo 无需 API Key'
     inpSearchKey.disabled = true
     searchKeyStatus.textContent = '(无需 Key)'
+  } else if (selSearchProvider.value === 'anthropic') {
+    inpSearchKey.placeholder = 'Anthropic API Key (sk-ant-...)'
+    inpSearchKey.disabled = false
+    searchKeyStatus.textContent = '(需key，Claude内建搜索)'
   } else {
     inpSearchKey.placeholder = '搜索服务商 API Key'
     inpSearchKey.disabled = false

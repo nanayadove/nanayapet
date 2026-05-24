@@ -52,6 +52,8 @@ async function execute(params, config) {
         return await searchTavily(query, provSettings)
       case 'serper':
         return await searchSerper(query, provSettings)
+      case 'anthropic':
+        return await searchAnthropicNative(query, provSettings)
       case 'duckduckgo':
       default:
         return await searchDuckDuckGo(query)
@@ -229,6 +231,78 @@ function formatSerperResult(query, data) {
 
   if (organic.length === 0 && !data.answerBox) {
     parts.push('\n没有找到相关结果')
+  }
+
+  return { success: true, result: parts.join('\n'), data }
+}
+
+// ================================================================
+// Anthropic Native Web Search（Claude 内建搜索，服务端执行）
+// ================================================================
+// 利用 Claude API 的 web_search_20250305 工具，搜索在 Anthropic 服务端完成
+// 无需外部搜索引擎，结果直接嵌入 API 响应
+// 需要 Anthropic API Key（https://console.anthropic.com）
+async function searchAnthropicNative(query, provSettings) {
+  const apiKey = provSettings.api_key
+  if (!apiKey) {
+    return { success: false, result: '未配置 Anthropic API Key，请在设置中填写' }
+  }
+
+  const model = provSettings.model || 'claude-haiku-4-5'
+  const baseUrl = provSettings.base_url || 'https://api.anthropic.com/v1'
+
+  logError(`[web-search] Anthropic 请求: query="${query}", model=${model}`)
+
+  const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/messages`, {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'web-search-2025-03-05',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: model,
+      max_tokens: 2048,
+      messages: [
+        {
+          role: 'user',
+          content: `Search the web for information about: ${query}\n\nProvide a concise summary of what you find.`
+        }
+      ],
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+    })
+  })
+
+  if (!res.ok) {
+    const errText = await res.text()
+    logError(`[web-search] Anthropic HTTP ${res.status}: ${errText.slice(0, 300)}`)
+    throw new Error(`HTTP ${res.status}: ${errText.slice(0, 200)}`)
+  }
+
+  const data = await res.json()
+  logError(`[web-search] Anthropic 响应: stop_reason=${data.stop_reason}`)
+
+  return formatAnthropicResult(query, data)
+}
+
+function formatAnthropicResult(query, data) {
+  const parts = [`搜索: "${query}"`]
+
+  // 遍历 content 块：text 块是 Claude 的回复，web_search_result 块是搜索结果
+  const content = data.content || []
+  for (const block of content) {
+    if (block.type === 'text' && block.text) {
+      parts.push(`\n【搜索结果】${block.text}`)
+    }
+    if (block.type === 'web_search_tool_result') {
+      // 服务端搜索返回的结果（如果有的版本这样返回）
+      parts.push(`\n【原始搜索】${JSON.stringify(block).slice(0, 500)}`)
+    }
+  }
+
+  if (content.length === 0) {
+    parts.push('\n未返回有效搜索结果')
   }
 
   return { success: true, result: parts.join('\n'), data }
