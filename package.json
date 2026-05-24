@@ -31,15 +31,6 @@
       "icon": null,
       "sign": null
     },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": null
-    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
