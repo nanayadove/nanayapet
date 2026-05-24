@@ -43,6 +43,20 @@ function isEncryptionAvailable() {
 }
 
 // ================================================================
+// 错误日志
+// ================================================================
+
+const ERROR_LOG = path.join(__dirname, '..', 'netpet-error.log')
+
+function logToFile(msg) {
+  const timestamp = new Date().toISOString()
+  const line = `[${timestamp}] ${msg}\n`
+  try {
+    fs.appendFileSync(ERROR_LOG, line, 'utf-8')
+  } catch {}
+}
+
+// ================================================================
 // 加密 / 解密
 // ================================================================
 
@@ -63,20 +77,23 @@ function encryptKey(plainKey) {
 
 // decryptKey(存储值) — 解密单条 API Key
 // 如果存储值不是 '__enc__:' 开头，就是明文（旧格式），直接返回
+// 解密失败时不会抛异常，返回 '' 并记录日志（防止跨机器复制 config 导致整个 load 失败）
 function decryptKey(stored) {
   if (!stored) return stored
-  // 判断是否加密格式：不以 '__enc__:' 开头说明是旧明文
   if (!stored.startsWith('__enc__:')) return stored
   if (!safeStorage || !safeStorage.isEncryptionAvailable()) {
-    console.warn('[Config] safeStorage 不可用，无法解密 API Key')
+    logToFile('[Config] safeStorage 不可用，无法解密 API Key，返回空值')
     return ''
   }
-  // .slice(8) 去掉前缀 '__enc__:'（8个字符）
-  // Buffer.from(b64, 'base64') 把 Base64 字符串恢复成 Buffer
-  // safeStorage.decryptString(Buffer) 解密得到明文
-  const b64 = stored.slice(8)
-  const buf = Buffer.from(b64, 'base64')
-  return safeStorage.decryptString(buf)
+  try {
+    const b64 = stored.slice(8)
+    const buf = Buffer.from(b64, 'base64')
+    return safeStorage.decryptString(buf)
+  } catch (err) {
+    // 最常见场景：config.json 从另一台机器复制过来，加密绑定原账户，解密失败
+    logToFile(`[Config] API Key 解密失败（可能来自另一台机器）: ${err.message}`)
+    return ''
+  }
 }
 
 // processAllProviderKeys(config, processor) — 遍历所有 provider 分组执行加/解密
@@ -112,15 +129,15 @@ function encryptProviders(config) {
 
 function load() {
   try {
-    // fs.readFileSync(路径, 编码) — 同步读取整个文件内容为字符串
     const raw = fs.readFileSync(CONFIG_PATH, 'utf-8')
-    // JSON.parse(字符串) — 把 JSON 字符串转成 JS 对象
     const config = JSON.parse(raw)
-    // 解密所有 API Key（只影响内存中的对象，不修改磁盘文件）
+    // 解密所有 API Key（解密失败时单个 key 降级为空串，不会导致整个 load 失败）
     decryptProviders(config)
     return config
   } catch (err) {
-    console.error('配置文件读取失败:', err.message)
+    const msg = `[Config] 配置文件读取/解析失败: ${err.message} — 使用默认配置`
+    console.error(msg)
+    logToFile(msg)
     // 读取失败时返回默认配置
     return {
       api_settings: {
@@ -135,7 +152,7 @@ function load() {
       },
       character_settings: {
         name: '七夜',
-        system_prompt: ''
+        system_prompt: '你是一只寄宿在用户桌面的电子宠物"七夜"（ななや），自称"吾辈"的高傲黑猫娘。\n回复时严格输出 JSON：{"reply": "回复内容", "emotion": "idle|happy|angry|sad|shy|confused"}'
       },
       ui_settings: {
         window_width: 320,
