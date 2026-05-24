@@ -46,7 +46,7 @@ async function makeAiModel(apiKey, baseURL, modelName) {
   const sdk = await aiSdk()
   if (!sdk) return null
   try {
-    const openai = sdk.createOpenAI({ apiKey, baseURL })
+    const openai = sdk.createOpenAI({ apiKey, baseURL, compatibility: 'compatible' })
     const model = openai(modelName)
     log(`AI model 创建: modelId=${model?.modelId || '???'}`)
     return model
@@ -71,6 +71,13 @@ async function callLLM({ client, aiModel, messages, temperature, stream, modelNa
         } else {
           const result = await sdk.generateText({ model: aiModel, messages, temperature })
           text = result.text
+          log(`AI SDK result keys: ${Object.keys(result).join(', ')}`)
+          log(`AI SDK result.text typeof=${typeof text}`)
+          // 检查其他可能的文本字段
+          for (const k of Object.keys(result)) {
+            if (k !== 'text' && typeof result[k] === 'string') log(`  result.${k} = "${result[k].slice(0,100)}"`)
+          }
+          if (result.response) log(`  result.response type=${typeof result.response}, keys=${Object.keys(result.response||{}).join(',')}`)
         }
         log(`AI SDK 调用成功, text 长度=${text.length}, 前100字符="${text.slice(0,100)}"`)
         if (!text || text.trim() === '') {
