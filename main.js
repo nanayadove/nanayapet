@@ -102,7 +102,9 @@ function createWindow() {
     frame: false,           // 无边框（没有标题栏、关闭按钮等系统装饰）
     transparent: true,      // 透明背景（让窗口可以是非矩形的）
     alwaysOnTop: true,      // 窗口始终置顶，不被其他窗口遮挡
-    resizable: false,       // 不可调整大小
+    resizable: true,        // 可拉伸缩放（用户拖拽窗口边缘）
+    minWidth: 240,          // 最小宽度，防止缩到看不见
+    minHeight: 400,         // 最小高度
     skipTaskbar: true,      // 不在任务栏显示
     webPreferences: {       // 网页视图（渲染进程）的安全配置
       // preload: 预加载脚本，在页面 JS 之前执行
@@ -126,6 +128,19 @@ function createWindow() {
 
   // mainWindow.on('closed', callback) — 监听窗口关闭事件
   mainWindow.on('closed', () => {
+    // 保存当前窗口尺寸到 config，下次启动恢复
+    try {
+      if (!mainWindow.isDestroyed()) {
+        const [w, h] = mainWindow.getSize()
+        const cfg = config.load()
+        cfg.ui_settings = cfg.ui_settings || {}
+        cfg.ui_settings.window_width = w
+        cfg.ui_settings.window_height = h
+        config.save(cfg)
+      }
+    } catch (err) {
+      console.error('[main] 保存窗口尺寸失败:', err.message)
+    }
     mainWindow = null
     // app.quit() — 退出整个 Electron 应用
     app.quit()
