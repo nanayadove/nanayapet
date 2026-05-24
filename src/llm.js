@@ -46,7 +46,18 @@ async function makeAiModel(apiKey, baseURL, modelName) {
   const sdk = await aiSdk()
   if (!sdk) return null
   try {
-    const openai = sdk.createOpenAI({ apiKey, baseURL, compatibility: 'compatible' })
+    const origFetch = globalThis.fetch
+    const openai = sdk.createOpenAI({
+      apiKey, baseURL,
+      fetch: async (url, init) => {
+        log(`>> HTTP ${init.method || 'GET'} ${url}`)
+        const res = await origFetch(url, init)
+        const clone = res.clone()
+        const body = await clone.text()
+        log(`<< HTTP ${res.status} body(${body.length}B): ${body.slice(0, 300)}`)
+        return res
+      }
+    })
     const model = openai(modelName)
     log(`AI model 创建: modelId=${model?.modelId || '???'}`)
     return model
