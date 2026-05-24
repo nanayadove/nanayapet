@@ -118,6 +118,10 @@ function createWindow() {
   // mainWindow.loadFile(路径) — 在窗口中加载 HTML 文件
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'))
 
+  // setAspectRatio(宽高比) — 限制窗口只能等比例缩放，拖拽任一边缘自动保持比例
+  // 宽高比 = window_width / window_height，默认 320/650 ≈ 0.492
+  mainWindow.setAspectRatio(winW / winH)
+
   // process.argv — Node.js 的命令行参数数组
   // 如果用 npm run dev 启动，会传入 --dev 参数，此时打开 DevTools
   if (process.argv.includes('--dev')) {
