@@ -70,7 +70,6 @@ async function chatCompletion({ model, messages, temperature, stream, jsonMode }
     for await (const chunk of result.textStream) {
       text += chunk
     }
-    if (jsonMode) console.log('[AI SDK] stream response preview:', text.slice(0, 200))
     return { text }
   }
 
@@ -80,7 +79,6 @@ async function chatCompletion({ model, messages, temperature, stream, jsonMode }
     temperature: temperature ?? 0.7,
     providerOptions: providerOpts,
   })
-  if (jsonMode) console.log('[AI SDK] response preview:', result.text.slice(0, 200))
   return { text: result.text }
 }
 

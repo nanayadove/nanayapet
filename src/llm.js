@@ -206,6 +206,8 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
       jsonMode: true,
     })
     answerText = result.text
+    // 调试：打印 LLM 完整原始输出（JSON 解析失败时关键排查信息）
+    if (jsonMode) console.log(`[LLM] 原始响应 (${answerText.length} 字符):`, answerText.slice(0, 500))
   } catch (err) {
     console.error('[LLM] API 请求失败:', err.message)
     if (err.statusCode) console.error('[LLM] HTTP 状态码:', err.statusCode)
