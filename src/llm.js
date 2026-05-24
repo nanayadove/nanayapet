@@ -195,6 +195,7 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
   // 通过 AI SDK 调用 LLM
   const { model: createModel } = await makeModel(config)
   const model = createModel(modelName)
+  console.log(`[LLM] model created:`, typeof model, model?.modelId || 'unknown')
 
   let answerText
   try {
