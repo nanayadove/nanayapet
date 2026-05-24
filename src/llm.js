@@ -10,7 +10,14 @@ const { buildToolPrompt } = require('./tool-prompt')
 const fs = require('fs')
 const path = require('path')
 
-const LOG = path.join(__dirname, '..', 'netpet-error.log')
+const { app } = require('electron')
+function getDataDir() {
+  if (app.isPackaged) {
+    return process.resourcesPath
+  }
+  return path.join(__dirname, '..')
+}
+const LOG = path.join(getDataDir(), 'netpet-error.log')
 function errLog(msg) {
   const line = `[${new Date().toISOString()}] [LLM] ${msg}\n`
   console.error(line.trim())

@@ -5,7 +5,14 @@
  */
 const fs = require('fs')
 const path = require('path')
-const LOG = path.join(__dirname, '..', 'netpet-error.log')
+function getDataDir() {
+  try {
+    const { app } = require('electron')
+    if (app.isPackaged) return process.resourcesPath
+  } catch {}
+  return path.join(__dirname, '..')
+}
+const LOG = path.join(getDataDir(), 'netpet-error.log')
 
 function log(msg) {
   const line = `[${new Date().toISOString()}] [AI-TEST] ${msg}\n`
@@ -15,7 +22,7 @@ function log(msg) {
 
 async function main() {
   // 1. 读 config.json 拿 api_settings
-  const rawCfg = fs.readFileSync(path.join(__dirname, '..', 'config.json'), 'utf-8')
+  const rawCfg = fs.readFileSync(path.join(getDataDir(), 'config.json'), 'utf-8')
   const cfg = JSON.parse(rawCfg)
   // 注意：config.json 里的 key 是加密的，这里只测连通性，手动解不了，跳过加密
   // 如果 config.json 的 key 是明文就直接用，是 __enc__: 开头则需要从程序内获取

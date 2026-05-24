@@ -10,6 +10,10 @@
 - [x] 后台自动总结记忆
 - [x] Config 驱动 UI 尺寸
 - [x] 窗口最小化按钮
+- [x] 系统托盘图标（最小化隐藏到托盘，左键恢复/右键菜单）
+- [x] Electron-builder zip 打包
+- [x] 配置文件预设随包分发
+- [x] 打包后路径修复（asar 内外读写分离）
 
 ## ✅ 阶段二：Agent 工具系统 [已完成]
 
@@ -60,15 +64,36 @@
 - [x] 模型下拉列表
 - [x] 气泡文字可选取复制
 
-## 🔜 阶段 3.7：后续迭代
+## 🔜 阶段四：知识库系统 [设计中]
 
-- [ ] `@ai-sdk/anthropic` 接入（Claude API 原生调用）
-- [ ] `api_format` 字段：openai / anthropic 格式切换
-- [ ] Web Search 动态降级：Provider 原生 → 外部引擎
-- [ ] 打字机效果（streaming 推送到前端逐字显示）
+目标：半结构化事实存储 + LIKE 模糊搜索 + 半自动知识补全
 
-## 🔮 阶段四：视觉升级
+### 4.1 数据模型
+- [ ] `facts` 表：事实提取与去重
+  - 字段：id, category, content, tags(JSON数组), confidence, source_msg_id, created_at, updated_at
+  - 标签由 LLM 自行生成，不固定枚举
+  - 保存前检查已有事实，相似则更新置信度而非重复插入
+- [ ] `knowledge` 表：外部知识存储
+  - 字段：id, topic, content, source(web/manual), source_url, created_at
 
-- [ ] Live2D 立绘
-- [ ] RAG 记忆语义搜索
-- [ ] Claude Agent SDK 复杂任务委托
+### 4.2 事实提取管道
+- [ ] 每轮对话后触发（3-5 条消息为一批）
+- [ ] LLM prompt：从对话中提取用户事实，输出 JSON `[{ category, content, tags[], confidence }]`
+- [ ] 去重逻辑：新事实与已有事实做 LIKE 模糊比较，70% 相似则合并（置信度+0.1）
+- [ ] 静默执行，不打断对话
+
+### 4.3 画像生成
+- [ ] 定时触发（每日一次，或积累 20 条新事实）
+- [ ] LLM 阅读所有事实，生成用户画像摘要存入 `messages`（role: 'profile'）
+- [ ] 画像注入每次对话的 system prompt 前缀
+
+### 4.4 知识补全
+- [ ] LLM 回复末尾检测知识盲区
+- [ ] 自然表达："这个话题吾辈不太熟，要帮你去查一下吗？"
+- [ ] 用户确认 → web_search → 结果存入 `knowledge` 表
+- [ ] 下次同类话题自动引用已有知识
+
+### 4.5 检索与回忆
+- [ ] `tools:search_knowledge` — 宠物可主动调用搜索事实和知识
+- [ ] SQLite LIKE 模糊匹配事实和知识表
+- [ ] 用户对话中提及关键词 → 自动注入相关事实到 LLM 上下文

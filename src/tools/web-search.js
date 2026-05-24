@@ -17,7 +17,14 @@
 const fs = require('fs')
 const path = require('path')
 
-const ERROR_LOG = path.join(__dirname, '..', '..', 'netpet-error.log')
+const { app } = require('electron')
+function getDataDir() {
+  if (app.isPackaged) {
+    return process.resourcesPath
+  }
+  return path.join(__dirname, '..', '..')
+}
+const ERROR_LOG = path.join(getDataDir(), 'netpet-error.log')
 
 function logError(msg) {
   const timestamp = new Date().toISOString()

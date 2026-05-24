@@ -21,7 +21,15 @@ const path = require('path')
 
 // path.join() 把参数拼成完整路径
 // __dirname 是当前文件目录，'..' 是上一级，最终指向项目根目录的 config.json
-const CONFIG_PATH = path.join(__dirname, '..', 'config.json')
+const { app } = require('electron')
+function getConfigDir() {
+  if (app.isPackaged) {
+    return process.resourcesPath
+  }
+  return path.join(__dirname, '..')
+}
+const CONFIG_PATH = path.join(getConfigDir(), 'config.json')
+const CONFIG_EXAMPLE_PATH = path.join(getConfigDir(), 'config.example.json')
 
 // 保存 safeStorage 实例的引用（由 main.js 在启动时传入）
 let safeStorage = null
@@ -46,7 +54,7 @@ function isEncryptionAvailable() {
 // 错误日志
 // ================================================================
 
-const ERROR_LOG = path.join(__dirname, '..', 'netpet-error.log')
+const ERROR_LOG = path.join(getConfigDir(), 'netpet-error.log')
 
 function logToFile(msg) {
   const timestamp = new Date().toISOString()
@@ -129,6 +137,9 @@ function encryptProviders(config) {
 
 function load() {
   try {
+    if (!fs.existsSync(CONFIG_PATH) && fs.existsSync(CONFIG_EXAMPLE_PATH)) {
+      fs.copyFileSync(CONFIG_EXAMPLE_PATH, CONFIG_PATH)
+    }
     const raw = fs.readFileSync(CONFIG_PATH, 'utf-8')
     const config = JSON.parse(raw)
     // 解密所有 API Key（解密失败时单个 key 降级为空串，不会导致整个 load 失败）
@@ -138,6 +149,15 @@ function load() {
     const msg = `[Config] 配置文件读取/解析失败: ${err.message} — 使用默认配置`
     console.error(msg)
     logToFile(msg)
+    // 尝试从 config.example.json 读取
+    try {
+      if (fs.existsSync(CONFIG_EXAMPLE_PATH)) {
+        const raw = fs.readFileSync(CONFIG_EXAMPLE_PATH, 'utf-8')
+        const config = JSON.parse(raw)
+        decryptProviders(config)
+        return config
+      }
+    } catch {}
     // 读取失败时返回默认配置
     return {
       api_settings: {

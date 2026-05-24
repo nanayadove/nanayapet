@@ -25,7 +25,7 @@
 //   const app = electron.app
 //   const BrowserWindow = electron.BrowserWindow
 //   ...以此类推
-const { app, BrowserWindow, ipcMain, safeStorage } = require('electron')
+const { app, BrowserWindow, ipcMain, safeStorage, Tray, Menu, nativeImage } = require('electron')
 
 // require('path') — Node.js 内置模块，处理文件路径
 // path.join() 把多个片段拼成合法路径，自动适配 Windows(`\`) / Linux(`/`)
@@ -57,7 +57,8 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 
 // 获取错误日志文件路径
 function getLogPath() {
-  return path.join(__dirname, 'netpet-error.log')
+  const dir = app.isPackaged ? process.resourcesPath : __dirname
+  return path.join(dir, 'netpet-error.log')
 }
 
 // logError(err) — 记录错误到日志文件和控制台
@@ -75,6 +76,7 @@ function logError(err) {
 // 全局变量，保存窗口引用
 let mainWindow = null       // 宠物主窗口
 let settingsWindow = null   // 设置窗口
+let tray = null             // 系统托盘图标
 let scheduleInterval = null // 定时提醒的定时器 ID
 let idleInterval = null     // 主动搭话检测定时器
 let idleProbability = 0     // 当前触发概率（动态递增）
@@ -149,6 +151,8 @@ function createWindow() {
     // app.quit() — 退出整个 Electron 应用
     app.quit()
   })
+
+  createTray()
 
   // mainWindow.webContents.on('did-finish-load', callback) — 页面加载完成时触发
   mainWindow.webContents.on('did-finish-load', () => {
@@ -276,6 +280,60 @@ function triggerScheduleReminder(sch, systemContent) {
 }
 
 // ================================================================
+// 系统托盘
+// ================================================================
+
+function createTray() {
+  if (tray) return
+
+  const iconPath = path.join(__dirname, 'assets', 'idle.png')
+  const iconData = fs.readFileSync(iconPath)
+  const trayIcon = nativeImage.createFromBuffer(iconData).resize({ width: 16, height: 16 })
+  tray = new Tray(trayIcon)
+  tray.setToolTip('NetPet')
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: '显示/隐藏桌宠',
+      click: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow.isVisible()) {
+            mainWindow.hide()
+          } else {
+            mainWindow.show()
+            mainWindow.focus()
+          }
+        }
+      }
+    },
+    {
+      label: '设置',
+      click: () => openSettings()
+    },
+    { type: 'separator' },
+    {
+      label: '退出',
+      click: () => {
+        tray = null
+        app.quit()
+      }
+    }
+  ])
+
+  tray.setContextMenu(contextMenu)
+  tray.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isVisible()) {
+        mainWindow.hide()
+      } else {
+        mainWindow.show()
+        mainWindow.focus()
+      }
+    }
+  })
+}
+
+// ================================================================
 // IPC 处理器（主进程端）
 // ================================================================
 // ipcMain.handle(频道名, callback) — 注册一个 IPC 请求-响应处理器
@@ -288,7 +346,7 @@ function triggerScheduleReminder(sch, systemContent) {
 // ================================================================
 
 // ACTIVITY_FILE — 存储上次活跃时间的文件
-const ACTIVITY_FILE = path.join(__dirname, 'activity.json')
+const ACTIVITY_FILE = path.join(app.isPackaged ? process.resourcesPath : __dirname, 'activity.json')
 
 function getLastActiveTime() {
   try {
@@ -480,9 +538,9 @@ ipcMain.handle('llm:models', async (_e, baseUrl, apiKey) => {
 // settings:open — 打开设置窗口
 ipcMain.handle('settings:open', () => openSettings())
 
-// window:minimize — 最小化宠物窗口
+// window:minimize — 隐藏宠物窗口（到托盘）
 ipcMain.handle('window:minimize', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize()
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide()
 })
 
 // 工具管理 IPC
@@ -524,4 +582,8 @@ app.on('window-all-closed', () => {
   if (idleInterval) clearInterval(idleInterval)
   if (settingsWindow) settingsWindow.close()
   app.quit()
+})
+
+app.on('before-quit', () => {
+  if (tray) { tray.destroy(); tray = null }
 })

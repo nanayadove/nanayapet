@@ -25,3 +25,6 @@ activity.json
 # 临时文件
 screenshot.png
 install_electron.bat
+
+# 打包产物
+dist/

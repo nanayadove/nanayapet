@@ -26,8 +26,14 @@ const fs = require('fs')
 // __dirname 是当前文件所在的目录路径（Node.js 内置全局变量）
 const path = require('path')
 
-// 数据库文件路径：上一层目录的 memory.db
-const DB_PATH = path.join(__dirname, '..', 'memory.db')
+const { app } = require('electron')
+function getDataDir() {
+  if (app.isPackaged) {
+    return process.resourcesPath
+  }
+  return path.join(__dirname, '..')
+}
+const DB_PATH = path.join(getDataDir(), 'memory.db')
 
 // 全局变量：持有 sql.js 的 Database 实例
 // 初始化后一直复用，不重复创建
