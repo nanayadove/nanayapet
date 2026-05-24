@@ -52,7 +52,7 @@ body {
   display: flex;    /* 横向排列 */
   gap: 4px;         /* 子元素间距 */
   margin-bottom: 5px;
-  -webkit-app-region: drag;  /* 顶部栏可拖拽窗口 */
+}
 
 #top-bar span {
   flex: 1;          /* span 占满剩余空间，按钮被推到右边 */
@@ -68,7 +68,6 @@ body {
   background: rgba(100, 100, 100, 0.8);  /* 半透明灰色 */
   color: white;
   flex-shrink: 0;     /* 不被压缩 */
-  -webkit-app-region: no-drag;  /* 按钮不可拖拽，需要能点击 */
 }
 
 /* :hover — 伪类选择器，鼠标悬停时生效 */
@@ -102,7 +101,7 @@ body {
   overflow-y: auto;       /* 内容超出时竖向滚动 */
   display: none;          /* 默认隐藏 */
   line-height: 1.5;
-  -webkit-app-region: drag;  /* 气泡也可拖拽窗口 */
+}
 
 /* 当 JS 添加 .show 类时显示气泡 */
 #bubble.show {
@@ -143,8 +142,7 @@ body {
   font-family: "Microsoft YaHei", sans-serif;
   outline: none;            /* 去掉聚焦时的蓝色轮廓 */
   margin-bottom: 10px;
-  -webkit-app-region: no-drag;  /* 输入框不可拖拽，需要能输入 */
-  user-select: text;            /* 恢复文本选择（全局禁用了） */
+}
 
 /* ::placeholder — 伪元素选择器，设置输入框占位文字的样式 */
 #input-field::placeholder {
