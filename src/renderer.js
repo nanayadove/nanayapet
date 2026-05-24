@@ -28,11 +28,27 @@ let currentEmotion = 'idle'
 let isLoading = false
 
 // ===== 启动时加载配置 =====
-// 窗口尺寸由 CSS flex + 比例自适应，不再硬编码像素
+// window.api.getConfig() — 通过 preload.js 暴露的 IPC 调用，读取配置
+// 返回 Promise（异步结果）
+// .then(config => { ... }) — Promise 成功后执行的回调
 window.api.getConfig().then(config => {
+  // 可选链 ?. 安全读取嵌套属性
+  const ui = config.ui_settings || {}
+  const imgW = ui.image_width || 300
+  const imgH = ui.image_height || 440
+
+  // 把配置尺寸应用到页面元素上
+  // style.width / style.height — DOM 元素的 CSS 属性，必须带 'px' 单位
+  petImageArea.style.width = imgW + 'px'
+  petImageArea.style.height = imgH + 'px'
+  bubble.style.width = imgW + 'px'
+  inputField.style.width = imgW + 'px'
+  topBar.style.width = imgW + 'px'
+
   const name = config.character_settings?.name || '七夜喵'
   showBubble(`只是一只${name}。`)
 }).catch(() => {
+  // .catch() — Promise 失败时的回调
   showBubble('配置加载失败，请点击 设置 API Key')
 })
 
