@@ -86,6 +86,12 @@
       background: #4CAF50; color: white; border: none;
       border-radius: 5px; cursor: pointer; font-size: 13px;
     }
+    .model-dropdown {
+      width: 100%; margin-top: 4px;
+      border: 1px solid #4CAF50; border-radius: 5px;
+      font-size: 13px; padding: 4px;
+      font-family: "Microsoft YaHei", sans-serif;
+    }
     .tip {
       font-size: 11px; color: #999; margin-top: 2px;
     }
@@ -132,6 +138,7 @@
     <button class="tab active" data-page="page-api"><span class="tab-icon">🤖</span> 对话API</button>
     <button class="tab" data-page="page-memory"><span class="tab-icon">🧠</span> 记忆总结</button>
     <button class="tab" data-page="page-tools"><span class="tab-icon">🔧</span> 工具系统</button>
+    <button class="tab" data-page="page-search"><span class="tab-icon">🔍</span> 联网搜索</button>
     <button class="tab" data-page="page-character"><span class="tab-icon">🎭</span> 角色设定</button>
     <button class="tab" data-page="page-chat"><span class="tab-icon">💬</span> 主动搭话</button>
   </nav>
@@ -161,6 +168,7 @@
           <input id="inp-model" type="text" placeholder="deepseek-v4-flash">
           <button id="btn-fetch">获取列表</button>
         </div>
+        <select id="model-select" class="model-dropdown" size="6" style="display:none;"></select>
       </div>
       <div class="group">
         <label>温度 (Temperature)</label>
@@ -203,7 +211,38 @@
       </div>
       <div class="group">
         <label>工具提取模型（可选，留空则用对话模型）</label>
-        <input id="inp-tool-model" type="text" placeholder="deepseek-v4-flash">
+        <div class="model-row">
+          <input id="inp-tool-model" type="text" placeholder="deepseek-v4-flash">
+          <button id="btn-tool-fetch">获取列表</button>
+        </div>
+        <select id="tool-model-select" class="model-dropdown" size="6" style="display:none;"></select>
+      </div>
+    </div>
+
+    <!-- ===== 联网搜索 ===== -->
+    <div id="page-search" class="page">
+      <h3>联网搜索配置</h3>
+      <div class="tip" style="margin-bottom:12px;">让宠物可以根据你的需求搜索互联网信息。建议先用 DuckDuckGo（免费无需Key）。</div>
+
+      <div class="switch-row">
+        <label>启用搜索工具</label>
+        <label class="toggle">
+          <input id="inp-search-enabled" type="checkbox" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="group">
+        <label>搜索引擎</label>
+        <select id="sel-search-provider">
+          <option>duckduckgo</option><option>tavily</option><option>serper</option>
+        </select>
+        <div class="tip">DuckDuckGo 免费无需Key；Tavily 免费1000次/月；Serper 付费（Google搜索）</div>
+      </div>
+
+      <div class="group">
+        <label>API Key <span id="search-key-status" style="font-size:11px;color:#999;"></span></label>
+        <input id="inp-search-key" type="password" placeholder="搜索服务商 API Key">
       </div>
     </div>
 

@@ -79,29 +79,31 @@ function decryptKey(stored) {
   return safeStorage.decryptString(buf)
 }
 
-// 批量解密配置中所有 provider 的 api_key
-function decryptProviders(config) {
-  // 可选链 ?. 安全访问：防止 config 或 api_settings 为 undefined
-  const providers = config?.api_settings?.providers
-  if (!providers) return
-  // Object.keys(obj) — 返回对象所有键名组成的数组
-  for (const name of Object.keys(providers)) {
-    if (providers[name].api_key) {
-      // 直接修改对象属性（对象是引用传递）
-      providers[name].api_key = decryptKey(providers[name].api_key)
+// processAllProviderKeys(config, processor) — 遍历所有 provider 分组执行加/解密
+// 统一处理 api_settings.providers 和 web_search_settings.providers 两套密钥
+function processAllProviderKeys(config, processor) {
+  const groups = [
+    config?.api_settings?.providers,
+    config?.web_search_settings?.providers,
+  ]
+  for (const providers of groups) {
+    if (!providers) continue
+    for (const name of Object.keys(providers)) {
+      if (providers[name].api_key) {
+        providers[name].api_key = processor(providers[name].api_key)
+      }
     }
   }
 }
 
+// 批量解密配置中所有 provider 的 api_key
+function decryptProviders(config) {
+  processAllProviderKeys(config, decryptKey)
+}
+
 // 批量加密配置中所有 provider 的 api_key
 function encryptProviders(config) {
-  const providers = config?.api_settings?.providers
-  if (!providers) return
-  for (const name of Object.keys(providers)) {
-    if (providers[name].api_key) {
-      providers[name].api_key = encryptKey(providers[name].api_key)
-    }
-  }
+  processAllProviderKeys(config, encryptKey)
 }
 
 // ================================================================
@@ -148,6 +150,15 @@ function load() {
         idle_base_probability: 0.15,
         idle_escalation_enabled: false,
         idle_escalation_increment: 0.10,
+      },
+      web_search_settings: {
+        enabled: true,
+        provider: 'duckduckgo',
+        providers: {
+          tavily: { base_url: 'https://api.tavily.com', api_key: '' },
+          duckduckgo: { base_url: 'https://api.duckduckgo.com', api_key: '' },
+          serper: { base_url: 'https://google.serper.dev', api_key: '' },
+        }
       }
     }
   }
@@ -164,10 +175,11 @@ function needsMigration() {
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf-8')
     const onDisk = JSON.parse(raw)
-    const providers = onDisk?.api_settings?.providers || {}
-    // Object.values(obj) — 返回对象所有值组成的数组
-    // .some(fn) — 数组方法，至少有一个元素满足回调条件就返回 true
-    return Object.values(providers).some(
+    const allProviders = [
+      ...Object.values(onDisk?.api_settings?.providers || {}),
+      ...Object.values(onDisk?.web_search_settings?.providers || {}),
+    ]
+    return allProviders.some(
       p => p.api_key && !p.api_key.startsWith('__enc__:') && p.api_key !== '***'
     )
   } catch {
@@ -205,6 +217,15 @@ function save(config) {
     }
     // 同步更新当前选中的 provider 名称
     merged.api_settings.provider = config.api_settings.provider
+  }
+  // web_search_settings providers 也需要特殊合并
+  if (config.web_search_settings?.providers) {
+    merged.web_search_settings = merged.web_search_settings || {}
+    merged.web_search_settings.providers = {
+      ...(current.web_search_settings?.providers || {}),
+      ...config.web_search_settings.providers
+    }
+    merged.web_search_settings.provider = config.web_search_settings.provider
   }
   // 写入前加密所有 API Key
   encryptProviders(merged)

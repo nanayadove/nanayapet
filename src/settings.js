@@ -23,6 +23,14 @@ const inpMaxHistory = document.getElementById('inp-max-history')
 // ===== 工具系统页元素 =====
 const selToolProvider = document.getElementById('sel-tool-provider')
 const inpToolModel = document.getElementById('inp-tool-model')
+const btnToolFetch = document.getElementById('btn-tool-fetch')
+const toolModelSelect = document.getElementById('tool-model-select')
+
+// ===== 联网搜索页元素 =====
+const inpSearchEnabled = document.getElementById('inp-search-enabled')
+const selSearchProvider = document.getElementById('sel-search-provider')
+const inpSearchKey = document.getElementById('inp-search-key')
+const searchKeyStatus = document.getElementById('search-key-status')
 
 // ===== 角色设定页元素 =====
 const inpPrompt = document.getElementById('inp-prompt')
@@ -39,6 +47,7 @@ const inpProactiveIncrement = document.getElementById('inp-proactive-increment')
 const btnSave = document.getElementById('btn-save')
 const btnCancel = document.getElementById('btn-cancel')
 const statusEl = document.getElementById('status')
+const modelSelect = document.getElementById('model-select')
 
 let currentConfig = {}
 
@@ -115,6 +124,14 @@ function applyToUI(config) {
   inpProactiveProbability.value = (proactive.idle_base_probability ?? 0.15) * 100
   inpProactiveEscalation.checked = proactive.idle_escalation_enabled || false
   inpProactiveIncrement.value = (proactive.idle_escalation_increment ?? 0.10) * 100
+
+  // 搜索页
+  const search = config.web_search_settings || {}
+  inpSearchEnabled.checked = search.enabled !== false
+  selSearchProvider.value = search.provider || 'duckduckgo'
+  const searchProv = search.providers?.[selSearchProvider.value] || {}
+  inpSearchKey.value = searchProv.api_key || ''
+  updateSearchKeyHint()
 }
 
 // ================================================================
@@ -122,6 +139,10 @@ function applyToUI(config) {
 // ================================================================
 function collectFromUI() {
   const provName = selProvider.value
+  // 防守：textarea 为空时保留已有的 system_prompt，防止误覆盖丢失
+  const promptValue = inpPrompt.value.trim()
+  const existingPrompt = currentConfig.character_settings?.system_prompt || ''
+  const finalPrompt = promptValue || existingPrompt
   return {
     api_settings: {
       provider: provName,
@@ -141,7 +162,7 @@ function collectFromUI() {
     },
     character_settings: {
       name: '七夜',
-      system_prompt: inpPrompt.value.trim()
+      system_prompt: finalPrompt
     },
     ui_settings: {
       window_width: 320, window_height: 650,
@@ -154,22 +175,80 @@ function collectFromUI() {
       idle_base_probability: (parseFloat(inpProactiveProbability.value) || 15) / 100,
       idle_escalation_enabled: inpProactiveEscalation.checked,
       idle_escalation_increment: (parseFloat(inpProactiveIncrement.value) || 10) / 100,
+    },
+    web_search_settings: {
+      enabled: inpSearchEnabled.checked,
+      provider: selSearchProvider.value,
+      providers: {
+        [selSearchProvider.value]: {
+          api_key: inpSearchKey.value.trim(),
+        }
+      }
     }
   }
 }
 
-// ===== "获取列表" 按钮 =====
-btnFetch.addEventListener('click', async () => {
+// ===== 模型列表获取（通用） =====
+// fetchAndShowModels(baseUrl, apiKey, btn, selectEl, inputEl) — 获取模型并填充下拉框
+async function fetchAndShowModels(baseUrl, apiKey, btn, selectEl, inputEl) {
+  const origText = btn.textContent
+  btn.textContent = '获取中...'; btn.disabled = true
+  try {
+    const models = await window.api.getModels(baseUrl, apiKey)
+    if (!models || models.length === 0) {
+      statusEl.textContent = '未获取到模型'
+      return
+    }
+    populateModelSelect(selectEl, models, inputEl)
+    statusEl.textContent = `连接成功！获取到 ${models.length} 个模型`
+  } catch (err) {
+    statusEl.textContent = '获取失败: ' + err.message
+  }
+  btn.textContent = origText; btn.disabled = false
+}
+
+// populateModelSelect(selectEl, models, inputEl) — 填充下拉列表并显示
+function populateModelSelect(selectEl, models, inputEl) {
+  selectEl.innerHTML = ''
+  models.forEach(m => {
+    const opt = document.createElement('option')
+    opt.value = m; opt.textContent = m
+    selectEl.appendChild(opt)
+  })
+  selectEl.style.display = 'block'
+  // 点击下拉选项 → 填入输入框 → 隐藏下拉
+  selectEl.onchange = () => {
+    inputEl.value = selectEl.value
+    selectEl.style.display = 'none'
+  }
+}
+
+// ===== "获取列表" 按钮（对话 API 页） =====
+btnFetch.addEventListener('click', () => {
   const baseUrl = inpBaseUrl.value.trim()
   const apiKey = inpApiKey.value.trim()
   if (!baseUrl || !apiKey) { statusEl.textContent = '请先填写 Base URL 和 API Key'; return }
-  btnFetch.textContent = '获取中...'; btnFetch.disabled = true
-  try {
-    const models = await window.api.getModels(baseUrl, apiKey)
-    if (models && models.length > 0) inpModel.value = models[0]
-    statusEl.textContent = `连接成功！获取到 ${models?.length || 0} 个模型`
-  } catch (err) { statusEl.textContent = '获取失败: ' + err.message }
-  btnFetch.textContent = '获取列表'; btnFetch.disabled = false
+  fetchAndShowModels(baseUrl, apiKey, btnFetch, modelSelect, inpModel)
+})
+
+// ===== "获取列表" 按钮（工具模型页） =====
+// 工具提取服务商和对话服务商可能是不同的，需要拿到对应服务商的 base_url 和 api_key
+btnToolFetch.addEventListener('click', () => {
+  const toolProvName = selToolProvider.value
+  if (toolProvName === '同对话服务商') {
+    // 复用对话 API 配置
+    const baseUrl = inpBaseUrl.value.trim()
+    const apiKey = inpApiKey.value.trim()
+    if (!baseUrl || !apiKey) { statusEl.textContent = '请先在对话 API 页填写 Base URL 和 API Key'; return }
+    fetchAndShowModels(baseUrl, apiKey, btnToolFetch, toolModelSelect, inpToolModel)
+    return
+  }
+  // 独立服务商：从已加载配置中取
+  const prov = currentConfig.api_settings?.providers?.[toolProvName] || {}
+  const baseUrl = prov.base_url || ''
+  const apiKey = prov.api_key || ''
+  if (!baseUrl || !apiKey) { statusEl.textContent = `请先在对话 API 页配置 ${toolProvName} 的 Base URL 和 API Key`; return }
+  fetchAndShowModels(baseUrl, apiKey, btnToolFetch, toolModelSelect, inpToolModel)
 })
 
 // ===== 保存 =====
@@ -194,5 +273,23 @@ selProvider.addEventListener('change', () => {
     inpModel.value = api.model || ''
   }
 })
+
+// ===== 搜索引擎切换 =====
+function updateSearchKeyHint() {
+  if (selSearchProvider.value === 'duckduckgo') {
+    inpSearchKey.placeholder = 'DuckDuckGo 无需 API Key'
+    inpSearchKey.disabled = true
+    searchKeyStatus.textContent = '(无需 Key)'
+  } else {
+    inpSearchKey.placeholder = '搜索服务商 API Key'
+    inpSearchKey.disabled = false
+    searchKeyStatus.textContent = ''
+  }
+  // 切换时回填已保存的 Key
+  const search = currentConfig.web_search_settings || {}
+  const prov = search.providers?.[selSearchProvider.value] || {}
+  inpSearchKey.value = prov.api_key || ''
+}
+selSearchProvider.addEventListener('change', updateSearchKeyHint)
 
 loadConfig()

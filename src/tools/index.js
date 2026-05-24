@@ -12,6 +12,7 @@ const tools = {
   write_file: require('./write-file'),
   read_file:  require('./read-file'),
   schedule:   require('./schedule'),
+  web_search: require('./web-search'),
 }
 
 async function executeTool(toolName, params, config) {
