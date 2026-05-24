@@ -206,6 +206,9 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
       jsonMode: true,
     })
     answerText = result.text
+    // 调试：完整 result 对象
+    console.log('[LLM] AI SDK result keys:', Object.keys(result))
+    console.log('[LLM] AI SDK result:', JSON.stringify(result, null, 2).slice(0, 1000))
     // 写完整响应到日志文件，方便排查 JSON 解析失败
     try {
       const fs = require('fs')
