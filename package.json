@@ -28,6 +28,16 @@
         { "target": "nsis", "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }
       ],
+      "icon": null,
+      "sign": null
+    },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": null
     },
     "nsis": {
@@ -49,7 +59,8 @@
   "author": "nanayadove",
   "license": "ISC",
   "devDependencies": {
-    "electron": "^42.2.0"
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.65",
