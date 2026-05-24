@@ -8,9 +8,24 @@
  *
  * 返回值统一格式: { success: boolean, result: string, data?: object }
  *
+ * 错误日志写入项目根目录 netpet-error.log
+ *
  * @param {object} params — { query: 搜索关键词 }
  * @param {object} config — 全局配置
  */
+
+const fs = require('fs')
+const path = require('path')
+
+const ERROR_LOG = path.join(__dirname, '..', '..', 'netpet-error.log')
+
+function logError(msg) {
+  const timestamp = new Date().toISOString()
+  const line = `[${timestamp}] ${msg}\n`
+  try {
+    fs.appendFileSync(ERROR_LOG, line, 'utf-8')
+  } catch {}
+}
 
 async function execute(params, config) {
   const { query } = params
@@ -37,7 +52,9 @@ async function execute(params, config) {
         return await searchDuckDuckGo(query)
     }
   } catch (err) {
-    console.error(`[web-search] ${provider} 搜索失败:`, err.message)
+    const msg = `[web-search] ${provider} 搜索失败: ${err.message}`
+    console.error(msg)
+    logError(msg)
     return { success: false, result: `搜索失败 (${provider}): ${err.message}` }
   }
 }
@@ -109,13 +126,17 @@ function formatTavilyResult(query, data) {
 // 局限性: 只返回知识库即时答案，不返回网页搜索结果
 async function searchDuckDuckGo(query) {
   const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`
+  logError(`[web-search] DDG 请求: ${url}`)
 
   const res = await fetch(url)
   if (!res.ok) {
+    const errText = await res.text()
+    logError(`[web-search] DDG HTTP ${res.status}: ${errText.slice(0, 300)}`)
     throw new Error(`HTTP ${res.status}: ${res.statusText}`)
   }
 
   const data = await res.json()
+  logError(`[web-search] DDG 响应: AbstractText=${!!data.AbstractText}, RelatedTopics=${(data.RelatedTopics||[]).length}`)
   return formatDDGResult(query, data)
 }
 
