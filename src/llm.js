@@ -260,24 +260,40 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
   chatHistory.push({ role, content: finalContent })
 
   // 调 LLM API
-  let response
+  let answerText
   try {
-    response = await client.chat.completions.create({
-      model: model,
-      messages: chatHistory,
-      response_format: { type: 'json_object' },
-      temperature: api.temperature || 0.7,
-    })
+    // stream: true 时逐块累积，降低首字延迟(TTFB)；false 时直接拿完整响应
+    if (api.stream_enabled) {
+      const stream = await client.chat.completions.create({
+        model: model,
+        messages: chatHistory,
+        response_format: { type: 'json_object' },
+        temperature: api.temperature || 0.7,
+        stream: true,
+      })
+      let fullContent = ''
+      for await (const chunk of stream) {
+        // chunk.choices[0]?.delta?.content 是增量文本（可能为 undefined）
+        fullContent += chunk.choices[0]?.delta?.content || ''
+      }
+      answerText = fullContent
+    } else {
+      const response = await client.chat.completions.create({
+        model: model,
+        messages: chatHistory,
+        response_format: { type: 'json_object' },
+        temperature: api.temperature || 0.7,
+      })
+      answerText = response.choices[0].message.content
+    }
   } catch (err) {
     console.error('[LLM] API 请求失败:', err.message)
-    // err.status 是 HTTP 状态码（401 未授权、429 限流、500 服务器错误等）
     if (err.status) console.error('[LLM] HTTP 状态码:', err.status)
     if (err.code) console.error('[LLM] 错误码:', err.code)
     throw new Error(`API 请求失败: ${err.message}`)
   }
 
   // 解析 LLM 返回的 JSON
-  const answerText = response.choices[0].message.content
   const result = parseResponse(answerText)
 
   // 处理 completed_tasks：标记完成的任务

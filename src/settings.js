@@ -13,6 +13,7 @@ const inpBaseUrl = document.getElementById('inp-base-url')
 const inpApiKey = document.getElementById('inp-api-key')
 const inpModel = document.getElementById('inp-model')
 const inpTemperature = document.getElementById('inp-temperature')
+const inpStream = document.getElementById('inp-stream')
 const btnFetch = document.getElementById('btn-fetch')
 
 // ===== 记忆总结页元素 =====
@@ -103,6 +104,7 @@ function applyToUI(config) {
   inpApiKey.value = prov.api_key || ''
   inpModel.value = prov.model || ''
   inpTemperature.value = api.temperature ?? 0.7
+  inpStream.checked = api.stream_enabled !== false
 
   // 记忆页
   selSummaryProvider.value = api.summary_provider || '同对话服务商'
@@ -154,6 +156,7 @@ function collectFromUI() {
         }
       },
       temperature: parseFloat(inpTemperature.value) || 0.7,
+      stream_enabled: inpStream.checked,
       summary_provider: selSummaryProvider.value,
       summary_interval: parseInt(inpSummaryInterval.value) || 5,
       max_history_length: parseInt(inpMaxHistory.value) || 10,
