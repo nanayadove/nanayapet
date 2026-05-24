@@ -386,13 +386,25 @@ async function fetchModels(baseUrl, apiKey) {
 // ================================================================
 // LLM 返回的 JSON 格式：{ reply, emotion, completed_tasks? }
 // 因为 LLM 有时不严格输出纯 JSON（会多输出说明文字），所以需要容错处理
+
+// 合法的情绪标签白名单（前端立绘文件名依赖此列表）
+const VALID_EMOTIONS = ['idle', 'happy', 'angry', 'sad', 'shy', 'confused']
+
+// validEmotion(raw) — 校验情绪标签，非法值降级为 idle 并记录日志
+function validEmotion(emotion) {
+  const e = (emotion || '').trim().toLowerCase()
+  if (VALID_EMOTIONS.includes(e)) return e
+  if (emotion) console.error(`[LLM] 非法 emotion 值: "${emotion}" → 降级为 idle`)
+  return 'idle'
+}
+
 function parseResponse(text) {
   // 策略 1：直接 parse（最简单的情况，LLM 严格输出了纯 JSON）
   try {
     const parsed = JSON.parse(text)
     return {
       reply: parsed.reply || '呃...',
-      emotion: parsed.emotion || 'idle',
+      emotion: validEmotion(parsed.emotion),
       completed_tasks: parsed.completed_tasks || [],
     }
   } catch {}
@@ -415,7 +427,7 @@ function parseResponse(text) {
           const parsed = JSON.parse(candidate)
           return {
             reply: parsed.reply || '呃...',
-            emotion: parsed.emotion || 'idle',
+            emotion: validEmotion(parsed.emotion),
             completed_tasks: parsed.completed_tasks || [],
           }
         } catch {}
@@ -438,7 +450,7 @@ function parseResponse(text) {
     const parsed = JSON.parse(repaired)
     return {
       reply: parsed.reply || '呃...',
-      emotion: parsed.emotion || 'idle',
+      emotion: validEmotion(parsed.emotion),
       completed_tasks: parsed.completed_tasks || [],
     }
   } catch {}
