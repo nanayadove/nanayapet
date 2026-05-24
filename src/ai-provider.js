@@ -53,9 +53,11 @@ async function createProvider(apiKey, baseURL) {
 async function chatCompletion({ model, messages, temperature, stream, jsonMode }) {
   const { ai } = await loadSDK()
 
-  // 注意: AI SDK 的 providerOptions.responseFormat 格式可能与裸 OpenAI SDK 不同
-  // 暂时依赖 system_prompt 强制 JSON 输出，后续测试 providerOptions 透传后再启用
-  const providerOpts = {} // jsonMode disabled for now
+  // AI SDK 内部映射: type: 'json' → response_format: { type: 'json_object' }
+  // 传 'json_object' 反而会被丢弃（SDK 只检查 type === 'json'）
+  const providerOpts = jsonMode
+    ? { openai: { responseFormat: { type: 'json' } } }
+    : {}
 
   if (stream) {
     const result = ai.streamText({
