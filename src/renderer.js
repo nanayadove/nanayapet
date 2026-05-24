@@ -94,6 +94,11 @@ function showBubble(text) {
   bubble.classList.add('show')
 }
 
+// ===== 最小化按钮 =====
+document.getElementById('min-btn').addEventListener('click', () => {
+  window.api.minimizeWindow()
+})
+
 // ===== 关闭按钮 =====
 // window.close() — 浏览器 API，关闭当前窗口（Electron 中等于关闭窗口）
 document.getElementById('close-btn').addEventListener('click', () => {

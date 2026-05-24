@@ -168,7 +168,7 @@ function collectFromUI() {
       system_prompt: finalPrompt
     },
     ui_settings: {
-      window_width: 320, window_height: 650,
+      window_width: 400, window_height: 800,
       image_width: 300, image_height: 440
     },
     proactive_settings: {

@@ -1,6 +1,6 @@
 # NetPet - 桌面LLM虚拟宠物
 
-> v1.2.0
+> v1.4.0
 
 基于 Electron + JavaScript 的桌面 AI 宠物框架。通过在本地直接调用大语言模型 (LLM) API，打造属于你自己的 AI 桌面伙伴。
 
@@ -8,17 +8,20 @@
 
 ## 特性
 
-- **Electron 桌面应用**：HTML/CSS 构建的现代 UI，支持透明窗口、拖拽、气泡对话
+- **Electron 桌面应用**：HTML/CSS 构建的现代 UI，支持透明窗口、可拉伸缩放、拖拽、气泡对话
 - **情绪驱动立绘**：LLM 输出 JSON 格式 `{ reply, emotion }`，自动切换 6 种表情立绘
-- **独立设置窗口**：可视化配置 API Key、模型、Provider，支持测试连接 + 模型列表下拉选择
+- **独立设置窗口**：可视化配置 API Key、模型、Provider、搜索引擎、流式传输，支持模型列表下拉选择 + 测试连接
 - **SQLite 记忆系统**：自动保存对话历史，支持后台总结压缩长程记忆
 - **角色设定完全解耦**：修改 `config.json` 中的 System Prompt 即可换人设
 - **Agent 工具系统**：两步推理架构，LLM 可调用工具（记笔记/设提醒/查询/联网搜索）
+- **联网搜索**：支持 Tavily / DuckDuckGo / Serper / Anthropic(Claude原生) 四种引擎，可配置切换
+- **流式传输**：SSE 累积模式，降低首字响应延迟
+- **AI SDK 双引擎**：Vercel AI SDK v6 + 裸 openai SDK 降级，多 Provider 统一调用层
 - **AI 驱动任务管理**：LLM 自动判断任务是否完成，无需硬编码关键词匹配
 - **角色语气提醒**：定时提醒走 LLM 生成，用角色自己的语气说出来
 - **主动搭话系统**：支持启动问候 + 运行时概率递增搭话，宠物会主动找用户聊天
-- **联网搜索**：支持 Tavily / DuckDuckGo / Serper 三种搜索引擎，宠物可帮查实时信息
 - **API Key 加密存储**：系统级 safeStorage 加密，配置文件不存明文
+- **可拉伸窗口**：等比缩放，关闭自动记忆尺寸
 
 ## 快速开始
 
@@ -155,7 +158,8 @@ netpet/
 │   ├── settings.js      # 设置窗口逻辑
 │   ├── settings-preload.js # 设置窗口 IPC 桥接
 │   ├── config.js        # 配置读写 + API Key 加密存储
-│   ├── llm.js           # LLM 通信核心（两步推理架构）
+│   ├── llm.js           # LLM 通信核心（AI SDK 双引擎 + 两步推理）
+│   ├── ai-provider.js   # AI SDK 动态 import 包装层
 │   ├── tool-prompt.js   # 工具提取模型提示词模板
 │   ├── db.js            # SQLite 记忆存储 + 工具 CRUD
 │   └── tools/           # 工具模块
@@ -163,7 +167,7 @@ netpet/
 │       ├── write-file.js
 │       ├── read-file.js
 │       ├── schedule.js
-│       └── web-search.js # 联网搜索（Tavily/DDG/Serper）
+│       └── web-search.js # 联网搜索（Tavily/DDG/Serper/Anthropic）
 ├── assets/              # 立绘素材 (PNG)
 ├── 启动桌宠.bat         # 一键启动（双击即可）
 ├── 安装依赖.bat         # 一键安装依赖（首次双击，之后不用）

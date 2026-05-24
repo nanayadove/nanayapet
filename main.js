@@ -103,8 +103,8 @@ function createWindow() {
     transparent: true,      // 透明背景（让窗口可以是非矩形的）
     alwaysOnTop: true,      // 窗口始终置顶，不被其他窗口遮挡
     resizable: true,        // 可拉伸缩放（用户拖拽窗口边缘）
-    minWidth: 240,          // 最小宽度，防止缩到看不见
-    minHeight: 400,         // 最小高度
+    minWidth: 300,          // 最小宽度
+    minHeight: 500,         // 最小高度
     skipTaskbar: true,      // 不在任务栏显示
     webPreferences: {       // 网页视图（渲染进程）的安全配置
       // preload: 预加载脚本，在页面 JS 之前执行
@@ -479,6 +479,11 @@ ipcMain.handle('llm:models', async (_e, baseUrl, apiKey) => {
 
 // settings:open — 打开设置窗口
 ipcMain.handle('settings:open', () => openSettings())
+
+// window:minimize — 最小化宠物窗口
+ipcMain.handle('window:minimize', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize()
+})
 
 // 工具管理 IPC
 // 这些 = async () => 是箭头函数简写，等价于 async function() { return ... }

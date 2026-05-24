@@ -65,6 +65,8 @@ contextBridge.exposeInMainWorld('api', {
   getModels: (baseUrl, apiKey) => ipcRenderer.invoke('llm:models', baseUrl, apiKey),
   // openSettings() — 打开设置窗口
   openSettings: () => ipcRenderer.invoke('settings:open'),
+  // minimizeWindow() — 最小化宠物窗口
+  minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
 
   // ============ 工具管理 ============
 

@@ -11,9 +11,9 @@ const fs = require('fs')
 const path = require('path')
 
 const LOG = path.join(__dirname, '..', 'netpet-error.log')
-function log(msg) {
+function errLog(msg) {
   const line = `[${new Date().toISOString()}] [LLM] ${msg}\n`
-  console.log(line.trim())
+  console.error(line.trim())
   try { fs.appendFileSync(LOG, line, 'utf-8') } catch {}
 }
 
@@ -29,10 +29,10 @@ async function aiSdk() {
       import('@ai-sdk/openai'),
     ])
     _aiSdk = { generateText: aiMod.generateText, streamText: aiMod.streamText, createOpenAI: openaiMod.createOpenAI }
-    log('AI SDK 加载成功')
+    console.log('[LLM] AI SDK 加载成功')
     return _aiSdk
   } catch (err) {
-    log(`AI SDK 加载失败: ${err.message}`)
+    errLog(`AI SDK 加载失败: ${err.message}`)
     return null
   }
 }
@@ -46,23 +46,11 @@ async function makeAiModel(apiKey, baseURL, modelName) {
   const sdk = await aiSdk()
   if (!sdk) return null
   try {
-    const origFetch = globalThis.fetch
-    const openai = sdk.createOpenAI({
-      apiKey, baseURL,
-      fetch: async (url, init) => {
-        log(`>> HTTP ${init.method || 'GET'} ${url}`)
-        const res = await origFetch(url, init)
-        const clone = res.clone()
-        const body = await clone.text()
-        log(`<< HTTP ${res.status} body(${body.length}B): ${body.slice(0, 300)}`)
-        return res
-      }
-    })
-    const model = openai(modelName)
-    log(`AI model 创建: modelId=${model?.modelId || '???'}`)
+    const openai = sdk.createOpenAI({ apiKey, baseURL })
+    const model = openai.chat(modelName)  // .chat() → /chat/completions（.responses DeepSeek 不支持）
     return model
   } catch (err) {
-    log(`AI model 创建失败: ${err.message}`)
+    errLog(`AI model 创建失败: ${err.message}`)
     return null
   }
 }
@@ -82,27 +70,19 @@ async function callLLM({ client, aiModel, messages, temperature, stream, modelNa
         } else {
           const result = await sdk.generateText({ model: aiModel, messages, temperature })
           text = result.text
-          log(`AI SDK result keys: ${Object.keys(result).join(', ')}`)
-          log(`AI SDK result.text typeof=${typeof text}`)
-          // 检查其他可能的文本字段
-          for (const k of Object.keys(result)) {
-            if (k !== 'text' && typeof result[k] === 'string') log(`  result.${k} = "${result[k].slice(0,100)}"`)
-          }
-          if (result.response) log(`  result.response type=${typeof result.response}, keys=${Object.keys(result.response||{}).join(',')}`)
         }
-        log(`AI SDK 调用成功, text 长度=${text.length}, 前100字符="${text.slice(0,100)}"`)
         if (!text || text.trim() === '') {
-          log('AI SDK 返回空文本，降级到 raw SDK')
+          errLog('AI SDK 返回空文本，降级到 raw SDK')
         } else {
           return text
         }
       } catch (err) {
-        log(`AI SDK 调用异常: ${err.message}，降级到 raw SDK`)
+        errLog(`AI SDK 调用异常: ${err.message}，降级到 raw SDK`)
       }
     }
   }
   // 降级：原始 OpenAI SDK
-  log(`使用 raw SDK 调用, model=${modelName}`)
+  console.log(`[LLM] 使用 raw SDK 调用, model=${modelName}`)
   if (stream) {
     const streamResp = await client.chat.completions.create({
       model: modelName, messages, response_format: { type: 'json_object' }, temperature, stream: true,
@@ -152,7 +132,7 @@ function buildPendingContext() {
 
 function processCompletedTasks(tasks) {
   if (!Array.isArray(tasks) || tasks.length === 0) return
-  for (const id of tasks) { const n = parseInt(id); if (!isNaN(n)) { db.completeTool(n); log(`completed_tasks: ID ${n} 标记完成`) } }
+  for (const id of tasks) { const n = parseInt(id);     if (!isNaN(n)) { db.completeTool(n); console.log(`[LLM] completed_tasks: ID ${n}`) } }
 }
 
 // ================================================================
@@ -180,15 +160,15 @@ async function checkToolCall(config, userText, systemPrompt) {
     })
     const raw = response.choices[0].message.content
     const parsed = JSON.parse(raw)
-    if (parsed && parsed.tool) { log(`checkToolCall → ${parsed.tool}`); return { tool: parsed.tool, params: parsed.params || {}, raw } }
+    if (parsed && parsed.tool) { console.log(`[LLM] checkToolCall → ${parsed.tool}`); return { tool: parsed.tool, params: parsed.params || {}, raw } }
     return { tool: null, params: null, raw }
-  } catch (err) { log(`工具提取失败: ${err.message}`); return { tool: null, params: null } }
+  } catch (err) { errLog(`工具提取失败: ${err.message}`); return { tool: null, params: null } }
 }
 
 async function executeToolCall(config, toolName, params) {
-  log(`执行工具: ${toolName}`)
+  console.log(`[LLM] 执行工具: ${toolName}`)
   const result = await tools.executeTool(toolName, params, config)
-  log(`工具结果: ${result.result?.slice(0, 100)}`)
+  console.log(`[LLM] 工具结果: ${result.result?.slice(0, 100)}`)
   return result
 }
 
@@ -229,7 +209,7 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
   try {
     answerText = await callLLM({ client, aiModel, messages: chatHistory, temperature, stream, modelName })
   } catch (err) {
-    log(`API 请求失败: ${err.message}`)
+    errLog(`API 请求失败: ${err.message}`)
     throw new Error(`API 请求失败: ${err.message}`)
   }
 
@@ -239,7 +219,7 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
 
   const summaryData = db.checkAndSummarize(client, modelName, summaryInterval)
   if (summaryData) {
-    try { await db.doSummarize(api, summaryData) } catch (err) { log(`后台总结失败: ${err.message}`) }
+    try { await db.doSummarize(api, summaryData) } catch (err) { errLog(`后台总结失败: ${err.message}`) }
   }
 
   return { reply: result.reply, emotion: result.emotion }
@@ -282,7 +262,7 @@ const VALID_EMOTIONS = ['idle', 'happy', 'angry', 'sad', 'shy', 'confused']
 function validEmotion(emotion) {
   const e = (emotion || '').trim().toLowerCase()
   if (VALID_EMOTIONS.includes(e)) return e
-  if (emotion) log(`非法 emotion "${emotion}" → idle`)
+  if (emotion) errLog(`非法 emotion "${emotion}" → idle`)
   return 'idle'
 }
 
