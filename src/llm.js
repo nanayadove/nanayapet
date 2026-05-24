@@ -213,6 +213,11 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
 
   const client = makeClient(config)
   const systemPrompt = config.character_settings?.system_prompt || ''
+  // DeepSeek API 强制要求：使用 response_format json_object 时，prompt 中必须包含 "json"
+  const promptHasJSON = systemPrompt.toLowerCase().includes('json')
+  const effectivePrompt = promptHasJSON
+    ? systemPrompt
+    : systemPrompt + '\n请以JSON格式回复。'
   const model = prov.model || 'deepseek-v4-flash'
   const summaryInterval = api.summary_interval || 5
   // Math.max(a, b) — 取两个数中较大的，确保至少有足够的上下文
@@ -237,7 +242,7 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
   // 构建完整上下文消息数组
   const pendingContext = buildPendingContext()
   const chatHistory = [
-    { role: 'system', content: systemPrompt },  // 角色设定
+    { role: 'system', content: effectivePrompt },  // 角色设定
   ]
   if (pendingContext) chatHistory.push(pendingContext)  // 未完成事项
   // 加载最近对话历史
