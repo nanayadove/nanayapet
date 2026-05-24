@@ -173,8 +173,10 @@ async function checkToolCall(config, userText, systemPrompt) {
     // JSON.parse() 把 JSON 字符串转成 JS 对象
     const parsed = JSON.parse(raw)
     if (parsed && parsed.tool) {
+      console.log(`[LLM] checkToolCall 决定调用工具: ${parsed.tool}`, parsed.params)
       return { tool: parsed.tool, params: parsed.params || {}, raw }
     }
+    console.log(`[LLM] checkToolCall 不需要工具, reason: ${parsed?.reason || '无'}`)
     return { tool: null, params: null, raw }
   } catch (err) {
     console.error('[LLM] 工具提取模型调用失败:', err.message)

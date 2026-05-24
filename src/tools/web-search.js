@@ -29,17 +29,22 @@ function logError(msg) {
 
 async function execute(params, config) {
   const { query } = params
+  logError(`[web-search] execute 被调用, query="${query}", provider=${config.web_search_settings?.provider || '未配置'}`)
+
   if (!query || !query.trim()) {
+    logError('[web-search] 参数不足：query 为空')
     return { success: false, result: '搜索参数不足：需要 query（搜索关键词）' }
   }
 
   const wsConfig = config.web_search_settings || {}
   if (!wsConfig.enabled) {
+    logError('[web-search] 搜索功能未启用')
     return { success: false, result: '搜索功能未启用，请在设置中开启' }
   }
 
   const provider = wsConfig.provider || 'duckduckgo'
   const provSettings = wsConfig.providers?.[provider] || {}
+  logError(`[web-search] 开始搜索: provider=${provider}, hasKey=${!!provSettings.api_key}`)
 
   try {
     switch (provider) {
