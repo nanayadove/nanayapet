@@ -1,9 +1,8 @@
 // ===== llm.js — LLM 通信核心 =====
 //
-// 双引擎架构：AI SDK 主引擎 + 裸 openai SDK 降级
-// 所有错误写入 netpet-error.log
+// AI SDK 统一调用层：generateText / streamText
+// 知识库后台任务仍用裸 openai SDK（不需要 Provider 抽象）
 
-const OpenAI = require('openai')
 const db = require('./db')
 const tools = require('./tools/index')
 const { buildToolPrompt } = require('./tool-prompt')
@@ -45,10 +44,6 @@ async function aiSdk() {
 }
 
 // === 客户端创建 ===
-function makeRawClient(apiKey, baseURL) {
-  return new OpenAI({ apiKey, baseURL })
-}
-
 async function makeAiModel(apiKey, baseURL, modelName) {
   const sdk = await aiSdk()
   if (!sdk) return null
@@ -62,59 +57,25 @@ async function makeAiModel(apiKey, baseURL, modelName) {
   }
 }
 
-// === LLM 调用（AI SDK 优先，失败降级 raw） ===
-async function callLLM({ client, aiModel, messages, temperature, stream, modelName }) {
-  // 优先 AI SDK
-  if (aiModel) {
-    const sdk = await aiSdk()
-    if (sdk) {
-      try {
-        let text
-        if (stream) {
-          const result = sdk.streamText({ model: aiModel, messages, temperature })
-          text = ''
-          for await (const chunk of result.textStream) { text += chunk }
-        } else {
-          const result = await sdk.generateText({ model: aiModel, messages, temperature })
-          text = result.text
-        }
-        if (!text || text.trim() === '') {
-          errLog('AI SDK 返回空文本，降级到 raw SDK')
-        } else {
-          return text
-        }
-      } catch (err) {
-        errLog(`AI SDK 调用异常: ${err.message}，降级到 raw SDK`)
-      }
-    }
-  }
-  // 降级：原始 OpenAI SDK
-  console.log(`[LLM] 使用 raw SDK 调用, model=${modelName}`)
+// === LLM 调用（纯 AI SDK） ===
+async function callLLM({ aiModel, messages, temperature, stream }) {
+  if (!aiModel) throw new Error('AI SDK 模型未就绪')
+  const sdk = await aiSdk()
+  if (!sdk) throw new Error('AI SDK 不可用')
+
   if (stream) {
-    const streamResp = await client.chat.completions.create({
-      model: modelName, messages, response_format: { type: 'json_object' }, temperature, stream: true,
-    })
+    const result = sdk.streamText({ model: aiModel, messages, temperature })
     let text = ''
-    for await (const chunk of streamResp) { text += chunk.choices[0]?.delta?.content || '' }
+    for await (const chunk of result.textStream) { text += chunk }
     return text
   }
-  const response = await client.chat.completions.create({
-    model: modelName, messages, response_format: { type: 'json_object' }, temperature,
-  })
-  return response.choices[0].message.content
+  const result = await sdk.generateText({ model: aiModel, messages, temperature })
+  return result.text
 }
 
 // ================================================================
-// 辅助函数（不变）
+// 辅助函数
 // ================================================================
-function makeClient(config, providerName) {
-  const api = config.api_settings || {}
-  const provName = providerName || api.provider || 'deepseek'
-  const prov = api.providers?.[provName]
-  if (!prov?.api_key || !prov?.base_url) throw new Error('API 未配置')
-  return new OpenAI({ apiKey: prov.api_key, baseURL: prov.base_url })
-}
-
 function getCurrentToolsContext() {
   return {
     notes: db.getToolsByType('note', 'active'),
@@ -151,7 +112,6 @@ async function checkToolCall(config, userText, systemPrompt) {
   const prov = api.providers?.[provName]
   if (!prov?.api_key) return { tool: null, params: null }
   const toolModelName = (api.tool_model && api.tool_model !== '同对话服务商') ? api.tool_model : prov.model
-  const client = makeClient(config, provName)
 
   const charName = config.character_settings?.name || '七夜喵'
   const toolPrompt = buildToolPrompt(charName, getCurrentToolsContext())
@@ -160,15 +120,18 @@ async function checkToolCall(config, userText, systemPrompt) {
   const timeStr = now.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'long' })
 
   try {
-    const response = await client.chat.completions.create({
-      model: toolModelName,
+    const aiModel = await makeAiModel(prov.api_key, prov.base_url, toolModelName)
+    if (!aiModel) return { tool: null, params: null }
+
+    const text = await callLLM({
+      aiModel,
       messages: [{ role: 'system', content: toolPrompt }, ...recentHistory.slice(-4), { role: 'user', content: `[当前系统时间: ${timeStr}] 用户说: ${userText}` }],
-      response_format: { type: 'json_object' }, temperature: 0.1,
+      temperature: 0.1,
+      stream: false,
     })
-    const raw = response.choices[0].message.content
-    const parsed = JSON.parse(raw)
-    if (parsed && parsed.tool) { console.log(`[LLM] checkToolCall → ${parsed.tool}`); return { tool: parsed.tool, params: parsed.params || {}, raw } }
-    return { tool: null, params: null, raw }
+    const parsed = JSON.parse(text)
+    if (parsed && parsed.tool) { console.log(`[LLM] checkToolCall → ${parsed.tool}`); return { tool: parsed.tool, params: parsed.params || {}, raw: text } }
+    return { tool: null, params: null, raw: text }
   } catch (err) { errLog(`工具提取失败: ${err.message}`); return { tool: null, params: null } }
 }
 
@@ -236,13 +199,12 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
   if (extraMessages?.length) for (const m of extraMessages) chatHistory.push(m)
   chatHistory.push({ role: isSystem ? 'system' : 'user', content: finalContent })
 
-  // 准备双引擎
-  const client = makeClient(config)
+  // AI SDK 调用
   const aiModel = await makeAiModel(prov.api_key, prov.base_url, modelName)
 
   let answerText
   try {
-    answerText = await callLLM({ client, aiModel, messages: chatHistory, temperature, stream, modelName })
+    answerText = await callLLM({ aiModel, messages: chatHistory, temperature, stream })
   } catch (err) {
     errLog(`API 请求失败: ${err.message}`)
     throw new Error(`API 请求失败: ${err.message}`)
@@ -253,7 +215,7 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
   if (!isSystem) db.saveMessage('user', finalContent)
   db.saveMessage('assistant', answerText)
 
-  const summaryData = db.checkAndSummarize(client, modelName, summaryInterval)
+  const summaryData = db.checkAndSummarize(null, modelName, summaryInterval)
   if (summaryData) {
     try { await db.doSummarize(api, summaryData) } catch (err) { errLog(`后台总结失败: ${err.message}`) }
   }
@@ -322,6 +284,7 @@ function clearPendingSearch() { pendingSearch = null }
 // 知识库模型解析
 // ================================================================
 function getKnowledgeConfig(config) {
+  const OpenAI = require('openai')
   const ks = config.knowledge_settings || {}
   const kProvName = ks.knowledge_provider || ''
   const kModelName = ks.knowledge_model || ''
