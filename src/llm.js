@@ -63,13 +63,14 @@ async function callLLM({ aiModel, messages, temperature, stream }) {
   const sdk = await aiSdk()
   if (!sdk) throw new Error('AI SDK 不可用')
 
+  const providerOpts = { openai: { responseFormat: { type: 'json' } } }
   if (stream) {
-    const result = sdk.streamText({ model: aiModel, messages, temperature })
+    const result = sdk.streamText({ model: aiModel, messages, temperature, providerOptions: providerOpts })
     let text = ''
     for await (const chunk of result.textStream) { text += chunk }
     return text
   }
-  const result = await sdk.generateText({ model: aiModel, messages, temperature })
+  const result = await sdk.generateText({ model: aiModel, messages, temperature, providerOptions: providerOpts })
   return result.text
 }
 
