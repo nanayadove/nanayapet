@@ -65,7 +65,8 @@ async function callLLM({ aiModel, messages, temperature, stream }) {
 
   const providerOpts = { openai: { responseFormat: { type: 'json' } } }
   if (stream) {
-    const result = sdk.streamText({ model: aiModel, messages, temperature, providerOptions: providerOpts })
+    // 流式模式下不传 response_format — SSE 分块时 JSON 不完整，LLM 容易输出断裂
+    const result = sdk.streamText({ model: aiModel, messages, temperature })
     let text = ''
     for await (const chunk of result.textStream) { text += chunk }
     return text
@@ -491,6 +492,25 @@ function parseResponse(text) {
   }
   let r = text.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')
   try { const p = JSON.parse(r); return { reply: p.reply||'呃...', emotion: validEmotion(p.emotion), completed_tasks: p.completed_tasks||[], need_search: !!p.need_search, search_topic: p.search_topic||null } } catch {}
+
+  // 策略 4：流式截断修复 — 补缺失的引号和括号
+  try {
+    let repaired = text.trim()
+    // 补末尾缺失的 }
+    let openBraces = (repaired.match(/\{/g) || []).length
+    let closeBraces = (repaired.match(/\}/g) || []).length
+    while (closeBraces < openBraces) { repaired += '}'; closeBraces++ }
+    // 补末尾缺失的 "
+    let openQuotes = 0; let inStr = false
+    for (const ch of repaired) { if (ch === '"') { inStr = !inStr; if (!inStr) openQuotes++ } else if (ch === '\\' && inStr) { /* skip escaped */ } }
+    if (inStr) repaired += '"'
+    // 补缺失的 ]
+    let openBrackets = (repaired.match(/\[/g) || []).length
+    let closeBrackets = (repaired.match(/\]/g) || []).length
+    while (closeBrackets < openBrackets) { repaired += ']'; closeBrackets++ }
+    const p = JSON.parse(repaired)
+    return { reply: p.reply||'呃...', emotion: validEmotion(p.emotion), completed_tasks: p.completed_tasks||[], need_search: !!p.need_search, search_topic: p.search_topic||null }
+  } catch {}
   throw new Error(`JSON 解析失败: ${text.slice(0, 200)}...`)
 }
 
