@@ -171,7 +171,7 @@ function loadContextForLlm(maxLen) {
   // 查找最近一条总结
   // ORDER BY id DESC LIMIT 1 — 按 ID 倒序取第一条（最新的）
   const summaryStmt = db.prepare(
-    "SELECT id, content FROM messages WHERE role='summary' ORDER BY id DESC LIMIT 1"
+    "SELECT id, content FROM messages WHERE content LIKE '[SUMMARY]%' ORDER BY id DESC LIMIT 1"
   )
   // stmt.step() — 执行查询，返回 true 表示取到一行，false 表示没更多行了
   // 必须先调 step()，再调 getAsObject() 才能拿到数据
@@ -187,7 +187,7 @@ function loadContextForLlm(maxLen) {
     // 有总结的情况：先放总结，再放总结之后的对话
     messages.push({
       role: 'system',
-      content: `[前情提要/记忆总结]: ${summaryRow.content}`
+      content: summaryRow.content
     })
     // 查询 ID 大于总结 ID 的所有消息（即总结之后的新消息）
     const recentStmt = db.prepare(
@@ -199,12 +199,11 @@ function loadContextForLlm(maxLen) {
     while (recentStmt.step()) {
       const row = recentStmt.getAsObject()
       if (row.role === 'offline') continue
-      const role = row.role === 'summary' || row.role === 'profile' ? 'system' : row.role
+      const role = row.role === 'summary' ? 'system' : row.role
       messages.push({ role, content: row.content })
     }
     recentStmt.free()
   } else {
-    // 没有总结：直接取最近 maxLen 条数据
     const recentStmt = db.prepare(
       'SELECT role, content FROM messages ORDER BY id DESC LIMIT ?'
     )
@@ -221,11 +220,11 @@ function loadContextForLlm(maxLen) {
     // rows.reverse() — 数组反转，把倒序变正序
     for (const row of rows.reverse()) {
       if (row.role === 'offline') continue
-      const role = row.role === 'summary' || row.role === 'profile' ? 'system' : row.role
+      const role = row.role === 'summary' ? 'system' : row.role
       messages.push({ role, content: row.content })
     }
-  }
 
+  }
   return messages
 }
 
@@ -237,7 +236,7 @@ function loadContextForLlm(maxLen) {
 function getUnsummarizedCount() {
   // 找最近一条总结的 ID
   const summaryStmt = db.prepare(
-    "SELECT id FROM messages WHERE role='summary' ORDER BY id DESC LIMIT 1"
+    "SELECT id FROM messages WHERE content LIKE '[SUMMARY]%' ORDER BY id DESC LIMIT 1"
   )
   summaryStmt.step()
   const summaryRow = summaryStmt.getAsObject()
@@ -261,7 +260,7 @@ function getUnsummarizedCount() {
 // 获取自上次总结以来的所有消息
 function getUnsummarizedMessages() {
   const summaryStmt = db.prepare(
-    "SELECT id FROM messages WHERE role='summary' ORDER BY id DESC LIMIT 1"
+    "SELECT id FROM messages WHERE content LIKE '[SUMMARY]%' ORDER BY id DESC LIMIT 1"
   )
   summaryStmt.step()
   const summaryRow = summaryStmt.getAsObject()
@@ -363,7 +362,7 @@ async function doSummarize(apiConfig, summaryData) {
     // res.choices[0].message.content — LLM 返回的文本内容
     const summaryText = res.choices[0].message.content.trim()
     // 把总结存入 messages 表，role='summary'
-    saveMessage('summary', summaryText)
+    saveMessage('system', '[SUMMARY] ' + summaryText)
     console.log('记忆总结已保存:', summaryText.substring(0, 50) + '...')
   } catch (err) {
     console.error('后台总结记忆失败:', err.message)
@@ -714,7 +713,7 @@ function getLastOfflineRecord() {
 
 // 加载最新画像
 function getLatestProfile() {
-  const stmt = db.prepare("SELECT content FROM messages WHERE role = 'profile' ORDER BY id DESC LIMIT 1")
+  const stmt = db.prepare("SELECT content FROM messages WHERE content LIKE '[PROFILE]%' ORDER BY id DESC LIMIT 1")
   const result = stmt.step() ? stmt.getAsObject() : null
   stmt.free()
   return result

@@ -460,7 +460,7 @@ ${factsText}
       temperature: 0.5,
     })
     const profileText = response.choices[0].message.content.trim()
-    db.saveMessage('profile', profileText)
+    db.saveMessage('system', '[PROFILE] ' + profileText)
     db.setMeta('last_profile_generation', new Date().toISOString())
     db.setMeta('facts_count_at_last_profile', String(facts.length))
     console.log('[Profile] 用户画像已更新')
