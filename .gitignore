@@ -21,6 +21,10 @@ node_modules/
 # 日志
 *.log
 activity.json
+netpet-error.log
+
+# 打包输出
+dist/
 
 # 临时文件
 screenshot.png
@@ -28,3 +32,6 @@ install_electron.bat
 
 # 打包产物
 dist/
+
+# 环境变量（token 等）
+.env
