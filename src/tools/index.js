@@ -9,10 +9,11 @@
  */
 
 const tools = {
-  write_file: require('./write-file'),
-  read_file:  require('./read-file'),
-  schedule:   require('./schedule'),
-  web_search: require('./web-search'),
+  write_file:      require('./write-file'),
+  read_file:       require('./read-file'),
+  schedule:        require('./schedule'),
+  web_search:      require('./web-search'),
+  search_knowledge: require('./search-knowledge'),
 }
 
 async function executeTool(toolName, params, config) {

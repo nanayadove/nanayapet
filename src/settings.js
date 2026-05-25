@@ -44,6 +44,25 @@ const inpProactiveProbability = document.getElementById('inp-proactive-probabili
 const inpProactiveEscalation = document.getElementById('inp-proactive-escalation')
 const inpProactiveIncrement = document.getElementById('inp-proactive-increment')
 
+// ===== 知识库页元素 =====
+const inpFactEnabled = document.getElementById('inp-fact-enabled')
+const inpFactBatch = document.getElementById('inp-fact-batch')
+const inpFactSimilarity = document.getElementById('inp-fact-similarity')
+const inpFactDecay = document.getElementById('inp-fact-decay')
+const inpProfileEnabled = document.getElementById('inp-profile-enabled')
+const inpProfileFacts = document.getElementById('inp-profile-facts')
+const inpProfileHours = document.getElementById('inp-profile-hours')
+const inpProfileMin = document.getElementById('inp-profile-min')
+const inpAutoInject = document.getElementById('inp-auto-inject')
+const inpMaxFacts = document.getElementById('inp-max-facts')
+const inpMaxKnowledge = document.getElementById('inp-max-knowledge')
+
+// ===== 知识库模型元素 =====
+const selKnowledgeProvider = document.getElementById('sel-knowledge-provider')
+const inpKnowledgeModel = document.getElementById('inp-knowledge-model')
+const btnKnowledgeFetch = document.getElementById('btn-knowledge-fetch')
+const knowledgeModelSelect = document.getElementById('knowledge-model-select')
+
 // ===== 全局元素 =====
 const btnSave = document.getElementById('btn-save')
 const btnCancel = document.getElementById('btn-cancel')
@@ -134,6 +153,25 @@ function applyToUI(config) {
   const searchProv = search.providers?.[selSearchProvider.value] || {}
   inpSearchKey.value = searchProv.api_key || ''
   updateSearchKeyHint()
+
+  // 知识库页
+  const ks = config.knowledge_settings || {}
+  selKnowledgeProvider.value = ks.knowledge_provider || '同对话服务商'
+  inpKnowledgeModel.value = ks.knowledge_model || ''
+  const fe = ks.fact_extraction || {}
+  inpFactEnabled.checked = fe.enabled !== false
+  inpFactBatch.value = fe.batch_size || 3
+  inpFactSimilarity.value = ks.similarity_threshold ?? 0.7
+  inpFactDecay.value = ks.decay_rate ?? 0.01
+  const pg = ks.profile_generation || {}
+  inpProfileEnabled.checked = pg.enabled !== false
+  inpProfileFacts.value = pg.new_facts_threshold || 20
+  inpProfileHours.value = pg.interval_hours || 24
+  inpProfileMin.value = pg.min_facts || 5
+  const ai = ks.auto_inject || {}
+  inpAutoInject.checked = ai.enabled !== false
+  inpMaxFacts.value = ai.max_facts ?? 5
+  inpMaxKnowledge.value = ai.max_knowledge ?? 5
 }
 
 // ================================================================
@@ -168,7 +206,7 @@ function collectFromUI() {
       system_prompt: finalPrompt
     },
     ui_settings: {
-      window_width: 400, window_height: 800,
+      window_width: 200, window_height: 400,
       image_width: 300, image_height: 440
     },
     proactive_settings: {
@@ -186,6 +224,27 @@ function collectFromUI() {
         [selSearchProvider.value]: {
           api_key: inpSearchKey.value.trim(),
         }
+      }
+    },
+    knowledge_settings: {
+      knowledge_provider: selKnowledgeProvider.value === '同对话服务商' ? '' : selKnowledgeProvider.value,
+      knowledge_model: inpKnowledgeModel.value.trim() || '',
+      fact_extraction: {
+        enabled: inpFactEnabled.checked,
+        batch_size: parseInt(inpFactBatch.value) || 3,
+      },
+      similarity_threshold: parseFloat(inpFactSimilarity.value) || 0.7,
+      decay_rate: parseFloat(inpFactDecay.value) || 0.01,
+      profile_generation: {
+        enabled: inpProfileEnabled.checked,
+        new_facts_threshold: parseInt(inpProfileFacts.value) || 20,
+        interval_hours: parseInt(inpProfileHours.value) || 24,
+        min_facts: parseInt(inpProfileMin.value) || 5,
+      },
+      auto_inject: {
+        enabled: inpAutoInject.checked,
+        max_facts: parseInt(inpMaxFacts.value) || 5,
+        max_knowledge: parseInt(inpMaxKnowledge.value) || 5,
       }
     }
   }
@@ -252,6 +311,23 @@ btnToolFetch.addEventListener('click', () => {
   const apiKey = prov.api_key || ''
   if (!baseUrl || !apiKey) { statusEl.textContent = `请先在对话 API 页配置 ${toolProvName} 的 Base URL 和 API Key`; return }
   fetchAndShowModels(baseUrl, apiKey, btnToolFetch, toolModelSelect, inpToolModel)
+})
+
+// ===== "获取列表" 按钮（知识库模型页） =====
+btnKnowledgeFetch.addEventListener('click', () => {
+  const kProvName = selKnowledgeProvider.value
+  if (kProvName === '同对话服务商') {
+    const baseUrl = inpBaseUrl.value.trim()
+    const apiKey = inpApiKey.value.trim()
+    if (!baseUrl || !apiKey) { statusEl.textContent = '请先在对话 API 页填写 Base URL 和 API Key'; return }
+    fetchAndShowModels(baseUrl, apiKey, btnKnowledgeFetch, knowledgeModelSelect, inpKnowledgeModel)
+    return
+  }
+  const prov = currentConfig.api_settings?.providers?.[kProvName] || {}
+  const baseUrl = prov.base_url || ''
+  const apiKey = prov.api_key || ''
+  if (!baseUrl || !apiKey) { statusEl.textContent = `请先在对话 API 页配置 ${kProvName} 的 Base URL 和 API Key`; return }
+  fetchAndShowModels(baseUrl, apiKey, btnKnowledgeFetch, knowledgeModelSelect, inpKnowledgeModel)
 })
 
 // ===== 保存 =====

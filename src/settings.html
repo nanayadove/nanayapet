@@ -6,17 +6,20 @@
   <title>NetPet 设置</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { width: 100vw; height: 100vh; overflow: hidden; }
     body {
       font-family: "Microsoft YaHei", sans-serif;
       background: #f0f0f5;
       color: #333;
       display: flex;
-      height: 620px;
-      width: 560px;
+      height: 100vh;
+      width: 100vw;
+      overflow: hidden;
+      position: relative;
     }
     /* ===== 左侧导航栏 ===== */
     nav {
-      width: 140px;
+      width: 120px;
       background: #e8e8ee;
       padding: 10px 0;
       display: flex;
@@ -57,7 +60,7 @@
     /* ===== 右侧内容区 ===== */
     main {
       flex: 1;
-      padding: 20px;
+      padding: 20px 20px 70px 20px;
       overflow-y: auto;
     }
     /* .page — 每个分类对应的内容块，默认隐藏 */
@@ -116,7 +119,7 @@
     input:checked + .slider::before { transform: translateX(20px); }
     /* 底部按钮 */
     footer {
-      position: absolute; bottom: 16px; right: 20px; left: 160px;
+      position: absolute; bottom: 16px; left: 120px; right: 20px;
       display: flex; gap: 8px; justify-content: flex-end;
     }
     footer button {
@@ -126,7 +129,7 @@
     #btn-save { background: #4CAF50; color: white; }
     #btn-cancel { background: #ccc; color: #333; }
     #status {
-      position: absolute; bottom: 48px; right: 20px; left: 160px;
+      position: absolute; bottom: 48px; left: 120px; right: 20px;
       font-size: 12px; color: #888; text-align: right;
     }
   </style>
@@ -139,6 +142,7 @@
     <button class="tab" data-page="page-memory"><span class="tab-icon">🧠</span> 记忆总结</button>
     <button class="tab" data-page="page-tools"><span class="tab-icon">🔧</span> 工具系统</button>
     <button class="tab" data-page="page-search"><span class="tab-icon">🔍</span> 联网搜索</button>
+    <button class="tab" data-page="page-knowledge"><span class="tab-icon">📚</span> 知识库</button>
     <button class="tab" data-page="page-character"><span class="tab-icon">🎭</span> 角色设定</button>
     <button class="tab" data-page="page-chat"><span class="tab-icon">💬</span> 主动搭话</button>
   </nav>
@@ -250,6 +254,99 @@
       <div class="group">
         <label>API Key <span id="search-key-status" style="font-size:11px;color:#999;"></span></label>
         <input id="inp-search-key" type="password" placeholder="搜索服务商 API Key">
+      </div>
+    </div>
+
+    <!-- ===== 知识库 ===== -->
+    <div id="page-knowledge" class="page">
+      <h3>知识库系统</h3>
+      <div class="tip" style="margin-bottom:12px;">自动从对话中提取事实、生成用户画像，去重后存入本地数据库。下次对话自动回忆。</div>
+
+      <div class="group">
+        <label>知识库处理服务商</label>
+        <select id="sel-knowledge-provider">
+          <option>同对话服务商</option><option>deepseek</option><option>openai</option><option>gemini</option><option>custom_openai</option>
+        </select>
+        <div class="tip">事实提取和画像生成使用的服务商。"同对话"则复用对话API配置</div>
+      </div>
+      <div class="group">
+        <label>知识库处理模型（可选，留空则用对话模型）</label>
+        <div class="model-row">
+          <input id="inp-knowledge-model" type="text" placeholder="deepseek-v4-flash">
+          <button id="btn-knowledge-fetch">获取列表</button>
+        </div>
+        <select id="knowledge-model-select" class="model-dropdown" size="6" style="display:none;"></select>
+        <div class="tip">建议用便宜的小模型节省成本。事实提取和画像生成共用此模型</div>
+      </div>
+
+      <hr style="margin:16px 0; border:none; border-top:1px solid #ddd;">
+
+      <div class="switch-row">
+        <label>启用事实提取</label>
+        <label class="toggle">
+          <input id="inp-fact-enabled" type="checkbox" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="group">
+        <label>触发轮数（多少条未处理消息触发一次提取）</label>
+        <input id="inp-fact-batch" type="number" min="2" max="20" value="3" placeholder="3">
+        <div class="tip">每 N 条用户+助手消息自动触发一次后台事实提取，最小2、最大20</div>
+      </div>
+      <div class="group">
+        <label>去重相似度阈值（0.5-1.0）</label>
+        <input id="inp-fact-similarity" type="number" step="0.05" min="0.5" max="1.0" value="0.7" placeholder="0.7">
+        <div class="tip">新事实与已有事实的相似度超过此值，不重复插入，改为更新置信度+0.1。值越低越容易合并</div>
+      </div>
+      <div class="group">
+        <label>置信度衰减率（0=不衰减，越大遗忘越快）</label>
+        <input id="inp-fact-decay" type="number" step="0.005" min="0" max="0.2" value="0.01" placeholder="0.01">
+        <div class="tip">每次更新置信度时先按时间衰减：新置信度 = 旧置信度 × e^(-衰减率×天数) + 增量。0.01约30天后衰减到74%，0.05约30天后衰减到22%</div>
+      </div>
+
+      <hr style="margin:16px 0; border:none; border-top:1px solid #ddd;">
+
+      <div class="switch-row">
+        <label>启用画像生成</label>
+        <label class="toggle">
+          <input id="inp-profile-enabled" type="checkbox" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="group">
+        <label>新事实数触发阈值</label>
+        <input id="inp-profile-facts" type="number" min="5" max="100" value="20" placeholder="20">
+        <div class="tip">累积超过此数量新事实后触发画像生成</div>
+      </div>
+      <div class="group">
+        <label>时间间隔触发（小时）</label>
+        <input id="inp-profile-hours" type="number" min="1" max="168" value="24" placeholder="24">
+        <div class="tip">距离上次生成超过此时间，且至少有少量新事实时触发</div>
+      </div>
+      <div class="group">
+        <label>最少事实数（低于此值不生成画像）</label>
+        <input id="inp-profile-min" type="number" min="1" max="50" value="5" placeholder="5">
+        <div class="tip">总事实数不足此值时不触发画像生成</div>
+      </div>
+
+      <hr style="margin:16px 0; border:none; border-top:1px solid #ddd;">
+
+      <div class="switch-row">
+        <label>自动注入上下文</label>
+        <label class="toggle">
+          <input id="inp-auto-inject" type="checkbox" checked>
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="group">
+        <label>最多注入事实数</label>
+        <input id="inp-max-facts" type="number" min="0" max="20" value="5" placeholder="5">
+        <div class="tip">每次对话最多注入几条相关事实到 LLM 上下文</div>
+      </div>
+      <div class="group">
+        <label>最多注入知识数</label>
+        <input id="inp-max-knowledge" type="number" min="0" max="20" value="5" placeholder="5">
+        <div class="tip">每次对话最多注入几条相关知识到 LLM 上下文</div>
       </div>
     </div>
 

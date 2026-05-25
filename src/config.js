@@ -176,8 +176,8 @@ function load() {
         system_prompt: '你是一只寄宿在用户桌面的电子宠物"七夜"（ななや），自称"吾辈"的高傲黑猫娘。\n回复时严格输出 JSON：{"reply": "回复内容", "emotion": "idle|happy|angry|sad|shy|confused"}'
       },
       ui_settings: {
-        window_width: 400,
-        window_height: 800,
+        window_width: 200,
+        window_height: 400,
         image_width: 300,
         image_height: 440
       },

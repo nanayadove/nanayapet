@@ -94,6 +94,37 @@ async function getDb() {
     )
   `)
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT,
+      content TEXT NOT NULL,
+      tags TEXT DEFAULT '[]',
+      confidence REAL DEFAULT 0.5,
+      source_msg_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS knowledge (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic TEXT NOT NULL,
+      content TEXT NOT NULL,
+      source TEXT DEFAULT 'web',
+      source_url TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    )
+  `)
+
   // 把建表后的数据库存盘
   saveDb()
   return db
@@ -167,7 +198,7 @@ function loadContextForLlm(maxLen) {
     // while (stmt.step()) — 循环取所有行，每调一次 step() 前进一行
     while (recentStmt.step()) {
       const row = recentStmt.getAsObject()
-      // DeepSeek API 不支持 'summary' 角色，统一转为 'system'
+      if (row.role === 'offline') continue
       const role = row.role === 'summary' ? 'system' : row.role
       messages.push({ role, content: row.content })
     }
@@ -179,14 +210,17 @@ function loadContextForLlm(maxLen) {
     )
     recentStmt.bind([maxLen])
     // 因为 SQL 是倒序取的（DESC），需要先收集再反转（reverse）恢复正序
-    const rows = []
-    while (recentStmt.step()) {
-      const row = recentStmt.getAsObject()
-      rows.push(row)
-    }
+  const rows = []
+  while (recentStmt.step()) {
+    const row = recentStmt.getAsObject()
+    if (row.role === 'offline') continue
+    const role = row.role === 'summary' ? 'system' : row.role
+    rows.push(row)
+  }
     recentStmt.free()
     // rows.reverse() — 数组反转，把倒序变正序
     for (const row of rows.reverse()) {
+      if (row.role === 'offline') continue
       const role = row.role === 'summary' ? 'system' : row.role
       messages.push({ role, content: row.content })
     }
@@ -457,6 +491,235 @@ function markScheduleFired(id) {
   saveDb()
 }
 
+// ================================================================
+// 元数据存取（key-value）
+// ================================================================
+
+function getMeta(key) {
+  const stmt = db.prepare('SELECT value FROM meta WHERE key = ?')
+  stmt.bind([key])
+  const result = stmt.step() ? stmt.getAsObject() : null
+  stmt.free()
+  return result ? result.value : null
+}
+
+function setMeta(key, value) {
+  const stmt = db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)')
+  stmt.run([key, String(value)])
+  stmt.free()
+  saveDb()
+}
+
+// ================================================================
+// 事实 (facts) CRUD
+// ================================================================
+
+function saveFact(category, content, tags, confidence, sourceMsgId) {
+  const stmt = db.prepare(
+    'INSERT INTO facts (category, content, tags, confidence, source_msg_id) VALUES (?, ?, ?, ?, ?)'
+  )
+  stmt.run([category || null, content, JSON.stringify(tags || []), confidence != null ? confidence : 0.5, sourceMsgId || null])
+  const id = db.exec('SELECT last_insert_rowid() as id')[0].values[0][0]
+  stmt.free()
+  saveDb()
+  return id
+}
+
+function updateFactConfidence(id, delta, decayRate) {
+  const readStmt = db.prepare("SELECT confidence, updated_at FROM facts WHERE id = ?")
+  readStmt.bind([id])
+  if (!readStmt.step()) { readStmt.free(); return }
+  const row = readStmt.getAsObject()
+  readStmt.free()
+
+  const now = new Date()
+  const updatedAt = new Date(row.updated_at || row.created_at || now)
+  const daysSince = Math.max(0, (now.getTime() - updatedAt.getTime()) / (1000 * 60 * 60 * 24))
+  const rate = decayRate != null ? decayRate : 0.01
+  const decayed = row.confidence * Math.exp(-rate * daysSince)
+  let newConf = decayed + delta
+  newConf = Math.max(0, Math.min(newConf, 1.0))
+
+  if (newConf < 0.05) {
+    const delStmt = db.prepare("DELETE FROM facts WHERE id = ?")
+    delStmt.run([id])
+    delStmt.free()
+  } else {
+    const updateStmt = db.prepare("UPDATE facts SET confidence = ?, updated_at = datetime('now') WHERE id = ?")
+    updateStmt.run([newConf, id])
+    updateStmt.free()
+  }
+  saveDb()
+}
+
+function findSimilarFact(content, threshold) {
+  const thresh = threshold != null ? threshold : 0.7
+  const searchText = (content || '').slice(0, 100).replace(/[%_]/g, '')
+  if (!searchText) return null
+
+  const keywords = searchText.split(/[\s,，。！？、]+/).filter(k => k.length >= 2).slice(0, 5)
+  let candidates = []
+  const seenIds = new Set()
+
+  for (const kw of keywords) {
+    const stmt = db.prepare("SELECT * FROM facts WHERE content LIKE ? AND content != ''")
+    stmt.bind([`%${kw}%`])
+    while (stmt.step()) {
+      const row = stmt.getAsObject()
+      if (!seenIds.has(row.id)) {
+        seenIds.add(row.id)
+        candidates.push(row)
+      }
+    }
+    stmt.free()
+    if (candidates.length >= 10) break
+  }
+
+  let bestMatch = null
+  let bestScore = 0
+  const src = searchText.toLowerCase()
+
+  for (const c of candidates) {
+    const tgt = (c.content || '').toLowerCase()
+    let score = 0
+    const longer = src.length >= tgt.length ? src : tgt
+    const shorter = src.length >= tgt.length ? tgt : src
+    if (shorter.length === 0) continue
+    for (let i = 0; i <= shorter.length - 3; i++) {
+      const seg = shorter.substring(i, i + 3)
+      if (longer.includes(seg)) score++
+    }
+    const similarity = score / Math.max(shorter.length - 2, 1)
+    if (similarity > bestScore) {
+      bestScore = similarity
+      bestMatch = c
+    }
+  }
+
+  if (bestScore >= thresh && bestMatch) {
+    return { fact: bestMatch, similarity: Math.round(bestScore * 100) / 100 }
+  }
+  return null
+}
+
+function searchFactsLike(query) {
+  const q = (query || '').replace(/[%_]/g, '')
+  if (!q) return []
+  const like = `%${q}%`
+  const stmt = db.prepare(
+    "SELECT * FROM facts WHERE (content LIKE ? OR category LIKE ? OR tags LIKE ?) ORDER BY confidence DESC LIMIT 10"
+  )
+  stmt.bind([like, like, like])
+  const rows = []
+  while (stmt.step()) { rows.push(stmt.getAsObject()) }
+  stmt.free()
+  return rows
+}
+
+function getAllFacts() {
+  const stmt = db.prepare('SELECT * FROM facts ORDER BY id DESC')
+  const rows = []
+  while (stmt.step()) { rows.push(stmt.getAsObject()) }
+  stmt.free()
+  return rows
+}
+
+// ================================================================
+// 知识 (knowledge) CRUD
+// ================================================================
+
+function saveKnowledge(topic, content, source, sourceUrl) {
+  const stmt = db.prepare(
+    'INSERT INTO knowledge (topic, content, source, source_url) VALUES (?, ?, ?, ?)'
+  )
+  stmt.run([topic, content, source || 'web', sourceUrl || null])
+  const id = db.exec('SELECT last_insert_rowid() as id')[0].values[0][0]
+  stmt.free()
+  saveDb()
+  return id
+}
+
+function searchKnowledgeLike(query) {
+  const q = (query || '').replace(/[%_]/g, '')
+  if (!q) return []
+  const like = `%${q}%`
+  const stmt = db.prepare(
+    "SELECT * FROM knowledge WHERE (topic LIKE ? OR content LIKE ?) ORDER BY id DESC LIMIT 10"
+  )
+  stmt.bind([like, like])
+  const rows = []
+  while (stmt.step()) { rows.push(stmt.getAsObject()) }
+  stmt.free()
+  return rows
+}
+
+function getAllKnowledge() {
+  const stmt = db.prepare('SELECT * FROM knowledge ORDER BY id DESC')
+  const rows = []
+  while (stmt.step()) { rows.push(stmt.getAsObject()) }
+  stmt.free()
+  return rows
+}
+
+// ================================================================
+// 事实提取辅助
+// ================================================================
+
+function getMessagesForFactExtraction(sinceId, limit) {
+  const stmt = db.prepare(
+    "SELECT id, role, content FROM messages WHERE id > ? AND role IN ('user', 'assistant') ORDER BY id ASC LIMIT ?"
+  )
+  stmt.bind([sinceId, limit || 6])
+  const rows = []
+  while (stmt.step()) { rows.push(stmt.getAsObject()) }
+  stmt.free()
+  return rows
+}
+
+function getUnprocessedFactCount() {
+  const lastId = parseInt(getMeta('last_fact_extraction_msg_id') || '0')
+  const stmt = db.prepare(
+    "SELECT count(*) as cnt FROM messages WHERE id > ? AND role IN ('user', 'assistant')"
+  )
+  stmt.bind([lastId])
+  stmt.step()
+  const result = stmt.getAsObject()
+  stmt.free()
+  return result.cnt
+}
+
+function getLatestMessageId() {
+  const stmt = db.prepare('SELECT MAX(id) as maxId FROM messages')
+  stmt.step()
+  const result = stmt.getAsObject()
+  stmt.free()
+  return result.maxId || 0
+}
+
+// ================================================================
+// 下线记录
+// ================================================================
+
+function saveOfflineRecord() {
+  const timestamp = new Date().toISOString()
+  saveMessage('offline', `[系统记录: 下线] ${timestamp}`)
+}
+
+function getLastOfflineRecord() {
+  const stmt = db.prepare("SELECT content, timestamp FROM messages WHERE role = 'offline' ORDER BY id DESC LIMIT 1")
+  const result = stmt.step() ? stmt.getAsObject() : null
+  stmt.free()
+  return result
+}
+
+// 加载最新画像
+function getLatestProfile() {
+  const stmt = db.prepare("SELECT content FROM messages WHERE role = 'profile' ORDER BY id DESC LIMIT 1")
+  const result = stmt.step() ? stmt.getAsObject() : null
+  stmt.free()
+  return result
+}
+
 // module.exports = { ... }
 // Node.js 模块导出：把函数暴露给其他文件
 // 其他文件用 const db = require('./db') 引入后，用 db.getDb()、db.saveMessage() 等方式调用
@@ -477,4 +740,20 @@ module.exports = {
   deleteTool,
   getUpcomingSchedules,
   markScheduleFired,
+  getMeta,
+  setMeta,
+  saveFact,
+  updateFactConfidence,
+  findSimilarFact,
+  searchFactsLike,
+  getAllFacts,
+  saveKnowledge,
+  searchKnowledgeLike,
+  getAllKnowledge,
+  getMessagesForFactExtraction,
+  getUnprocessedFactCount,
+  getLatestMessageId,
+  getLatestProfile,
+  saveOfflineRecord,
+  getLastOfflineRecord,
 }

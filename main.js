@@ -25,7 +25,7 @@
 //   const app = electron.app
 //   const BrowserWindow = electron.BrowserWindow
 //   ...以此类推
-const { app, BrowserWindow, ipcMain, safeStorage, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, safeStorage, Tray, Menu, nativeImage, Notification } = require('electron')
 
 // require('path') — Node.js 内置模块，处理文件路径
 // path.join() 把多个片段拼成合法路径，自动适配 Windows(`\`) / Linux(`/`)
@@ -41,6 +41,7 @@ const fs = require('fs')
 const config = require('./src/config')
 const llm = require('./src/llm')
 const db = require('./src/db')
+const tools = require('./src/tools/index')
 
 // config.init(safeStorage) — 把 Electron 的 safeStorage 实例传给 config 模块
 // config 模块用它加密/解密 API Key，保证配置文件里不存明文
@@ -59,6 +60,20 @@ app.commandLine.appendSwitch('disable-gpu-shader-disk-cache')
 function getLogPath() {
   const dir = app.isPackaged ? process.resourcesPath : __dirname
   return path.join(dir, 'netpet-error.log')
+}
+
+// pushToUser(channel, data) — 窗口可见时发气泡，最小化时发系统通知
+function pushToUser(channel, data) {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+    mainWindow.webContents.send(channel, data)
+  } else if (Notification.isSupported()) {
+    const notif = new Notification({
+      title: data.label || 'NetPet',
+      body: data.reply || data.message || '',
+      icon: path.join(__dirname, 'assets', 'idle.png'),
+    })
+    notif.show()
+  }
 }
 
 // logError(err) — 记录错误到日志文件和控制台
@@ -93,8 +108,8 @@ function createWindow() {
   //   cfg.ui_settings && cfg.ui_settings.window_width
   // 如果 ui_settings 不存在就返回 undefined 而不报错
   const ui = cfg.ui_settings || {}
-  const winW = ui.window_width || 320
-  const winH = ui.window_height || 650
+  const winW = ui.window_width || 200
+  const winH = ui.window_height || 400
 
   // new BrowserWindow({...}) — 创建一个 Electron 窗口
   // 参数对象配置窗口的各种属性
@@ -105,8 +120,8 @@ function createWindow() {
     transparent: true,      // 透明背景（让窗口可以是非矩形的）
     alwaysOnTop: true,      // 窗口始终置顶，不被其他窗口遮挡
     resizable: true,        // 可拉伸缩放（用户拖拽窗口边缘）
-    minWidth: 300,          // 最小宽度
-    minHeight: 500,         // 最小高度
+    minWidth: 200,          // 最小宽度
+    minHeight: 400,         // 最小高度
     skipTaskbar: true,      // 不在任务栏显示
     webPreferences: {       // 网页视图（渲染进程）的安全配置
       // preload: 预加载脚本，在页面 JS 之前执行
@@ -174,7 +189,7 @@ function openSettings() {
 
   settingsWindow = new BrowserWindow({
     width: 560,
-    height: 660,
+    height: 700,
     resizable: false,
     alwaysOnTop: true,
     parent: mainWindow,   // 父窗口：设置窗口是宠物窗口的子窗口
@@ -254,9 +269,7 @@ function triggerScheduleReminder(sch, systemContent) {
     .then(result => {
       // mainWindow 可能已被关闭（isDestroyed() 检查）
       if (mainWindow && !mainWindow.isDestroyed()) {
-        // mainWindow.webContents.send(频道, 数据) — 主进程向渲染进程推送消息
-        // 渲染进程通过 ipcRenderer.on(频道, callback) 接收
-        mainWindow.webContents.send('schedule:triggered', {
+        pushToUser('schedule:triggered', {
           id: sch.id,
           label: sch.label || '提醒',
           reply: result.reply,
@@ -267,15 +280,12 @@ function triggerScheduleReminder(sch, systemContent) {
     })
     .catch(err => {
       logError(err)
-      // LLM 失败时降级：用硬编码文本发送提醒
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('schedule:triggered', {
-          id: sch.id,
-          label: sch.label || '提醒',
-          reply: `提醒: ${sch.content || sch.label}`,
-          emotion: 'idle',
-        })
-      }
+      pushToUser('schedule:triggered', {
+        id: sch.id,
+        label: sch.label || '提醒',
+        reply: `提醒: ${sch.content || sch.label}`,
+        emotion: 'idle',
+      })
     })
 }
 
@@ -342,85 +352,52 @@ function createTray() {
 // 这是异步的，渲染进程 await invoke() 拿到返回值
 
 // ================================================================
-// 主动搭话：活动时间追踪
+// 主动搭话：启动时离线间隔检测
 // ================================================================
 
-// ACTIVITY_FILE — 存储上次活跃时间的文件
-const ACTIVITY_FILE = path.join(app.isPackaged ? process.resourcesPath : __dirname, 'activity.json')
-
-function getLastActiveTime() {
-  try {
-    if (fs.existsSync(ACTIVITY_FILE)) {
-      const data = JSON.parse(fs.readFileSync(ACTIVITY_FILE, 'utf-8'))
-      return new Date(data.last_active)
-    }
-  } catch {}
-  return null
-}
-
-function saveActiveTime() {
-  try {
-    fs.writeFileSync(ACTIVITY_FILE, JSON.stringify({
-      last_active: new Date().toISOString()
-    }), 'utf-8')
-  } catch (err) {
-    console.error('[Activity] 保存活跃时间失败:', err.message)
-  }
-}
-
-// checkActivityGap() — 检查距上次活跃的时间间隔
-// 如果超过配置的阈值，生成角色语气的关心问候
+// checkActivityGap() — 检查距上次下线的间隔
+// 如果超过配置的阈值，生成问候
 function checkActivityGap() {
   const cfg = config.load()
   const proactive = cfg.proactive_settings || {}
   if (!proactive.enabled) return
 
-  const lastActive = getLastActiveTime()
-  if (!lastActive) {
-    saveActiveTime()
-    return
-  }
+  const lastOffline = db.getLastOfflineRecord()
+  if (!lastOffline) return
 
-  // 计算间隔时长
+  const match = lastOffline.content.match(/\[系统记录: 下线\] (.+)/)
+  if (!match) return
+
+  const offlineTime = new Date(match[1])
+  if (isNaN(offlineTime.getTime())) return
+
   const now = new Date()
-  const gapMs = now.getTime() - lastActive.getTime()
+  const gapMs = now.getTime() - offlineTime.getTime()
   const gapHours = gapMs / (1000 * 60 * 60)
   const threshold = proactive.gap_hours || 6
 
-  // 间隔小于阈值则不触发
-  if (gapHours < threshold) {
-    saveActiveTime()
-    return
-  }
+  if (gapHours < threshold) return
 
-  // 格式化为人类可读的间隔描述
   let gapDesc = ''
   if (gapHours < 1) {
     gapDesc = `${Math.round(gapMs / (1000 * 60))}分钟`
   } else if (gapHours < 24) {
     gapDesc = `${Math.round(gapHours)}小时`
   } else {
-    const days = Math.round(gapHours / 24)
-    gapDesc = `${days}天`
+    gapDesc = `${Math.round(gapHours / 24)}天`
   }
 
-  // 构建 LLM 系统消息，触发问候（角色语气由 system_prompt 决定，这里只发中性指令）
-  const systemContent = `[系统通知] 用户重新上线了。距上次活跃已经过去了约${gapDesc}。
+  const systemContent = `[系统通知] 用户重新上线了。距上次下线已经过去了约${gapDesc}。
 请根据你的角色设定，主动问候用户。可以表达关心，猜测用户这段时间可能在忙什么。
 保持1-2句话的长度，不要太长。`
 
-  saveActiveTime()
-
-  // 异步发送，不阻塞窗口加载
   llm.sendSystemMessage(cfg, systemContent)
     .then(result => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('proactive:greeting', {
-          reply: result.reply,
-          emotion: result.emotion || 'idle',
-          gap: gapDesc,
-        })
-      }
+      pushToUser('proactive:greeting', {
+        reply: result.reply,
+        emotion: result.emotion || 'idle',
+        gap: gapDesc,
+      })
     })
     .catch(err => {
       console.error('[Activity] 问候生成失败:', err.message)
@@ -483,12 +460,10 @@ function checkIdleGreeting() {
 
   llm.sendSystemMessage(cfg, systemContent)
     .then(result => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('proactive:greeting', {
-          reply: result.reply,
-          emotion: result.emotion || 'idle',
-        })
-      }
+      pushToUser('proactive:greeting', {
+        reply: result.reply,
+        emotion: result.emotion || 'idle',
+      })
     })
     .catch(err => {
       console.error('[Idle] 搭话生成失败:', err.message)
@@ -518,12 +493,40 @@ ipcMain.handle('config:has-encryption', () => config.isEncryptionAvailable())
 // llm:send — 用户发送消息给 LLM
 // async 函数 + await 等待异步结果
 ipcMain.handle('llm:send', async (_event, userText) => {
-  saveActiveTime()
   lastInteractionTime = Date.now()
   resetIdleProbability()
+
+  const pendingSearch = llm.getPendingSearch()
+  if (pendingSearch) {
+    const text = userText.trim()
+    const confirmKeywords = ['好', '查', '搜', '可以', 'yes', 'ok', 'sure', '行', '嗯', '对', '要', '搜一下', '查一下']
+    const confirmed = confirmKeywords.some(k => text.includes(k))
+    if (confirmed) {
+      llm.clearPendingSearch()
+      const cfg = config.load()
+      try {
+        const searchResult = await tools.executeTool('web_search', { query: pendingSearch.topic }, cfg)
+        db.saveKnowledge(pendingSearch.topic, searchResult.result, 'web', '')
+        db.saveMessage('user', userText)
+        db.saveMessage('assistant', searchResult.result)
+        return { reply: `已搜索关于「${pendingSearch.topic}」的信息：\n\n${searchResult.result}`, emotion: 'happy' }
+      } catch (err) {
+        logError(err)
+        return { reply: `搜索失败: ${err.message}`, emotion: 'confused' }
+      }
+    }
+    llm.clearPendingSearch()
+  }
+
   const cfg = config.load()
   try {
-    return await llm.sendMessage(cfg, userText)
+    const result = await llm.sendMessage(cfg, userText)
+
+    if (result.need_search && result.search_topic) {
+      llm.setPendingSearch(result.search_topic)
+    }
+
+    return { reply: result.reply, emotion: result.emotion }
   } catch (err) {
     logError(err)
     throw err
@@ -560,30 +563,43 @@ ipcMain.handle('tools:delete', async (_e, id) => {
 // 应用启动
 // ================================================================
 
-// app.whenReady() — 返回 Promise，当 Electron 完成初始化时 resolve
-// 只有在这个之后才能创建窗口
-app.whenReady().then(() => {
-  // 检查是否需要把明文 API Key 迁移到加密存储
-  if (config.needsMigration()) {
-    try {
-      config.migrate()
-      console.log('[Config] 已迁移明文 API Key 到加密存储')
-    } catch (err) {
-      console.error('[Config] 迁移 API Key 失败:', err.message)
-    }
-  }
-  createWindow()
-})
-
-// app.on('window-all-closed', callback) — 所有窗口关闭时触发
-app.on('window-all-closed', () => {
-  // 清理定时器
-  if (scheduleInterval) clearInterval(scheduleInterval)
-  if (idleInterval) clearInterval(idleInterval)
-  if (settingsWindow) settingsWindow.close()
+// requestSingleInstanceLock() — 保证只运行一个实例
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
   app.quit()
-})
+} else {
+  app.on('second-instance', () => {
+    // 用户尝试启动第二个实例 → 激活已有窗口
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      if (!mainWindow.isVisible()) mainWindow.show()
+      mainWindow.focus()
+    }
+  })
 
-app.on('before-quit', () => {
-  if (tray) { tray.destroy(); tray = null }
-})
+  // app.whenReady() — 返回 Promise，当 Electron 完成初始化时 resolve
+  app.whenReady().then(() => {
+    // 检查是否需要把明文 API Key 迁移到加密存储
+    if (config.needsMigration()) {
+      try {
+        config.migrate()
+        console.log('[Config] 已迁移明文 API Key 到加密存储')
+      } catch (err) {
+        console.error('[Config] 迁移 API Key 失败:', err.message)
+      }
+    }
+    createWindow()
+  })
+
+  app.on('window-all-closed', () => {
+    try { db.saveOfflineRecord() } catch {}
+    if (scheduleInterval) clearInterval(scheduleInterval)
+    if (idleInterval) clearInterval(idleInterval)
+    if (settingsWindow) settingsWindow.close()
+    app.quit()
+  })
+
+  app.on('before-quit', () => {
+    if (tray) { tray.destroy(); tray = null }
+  })
+}
