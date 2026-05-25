@@ -199,7 +199,7 @@ function loadContextForLlm(maxLen) {
     while (recentStmt.step()) {
       const row = recentStmt.getAsObject()
       if (row.role === 'offline') continue
-      const role = row.role === 'summary' ? 'system' : row.role
+      const role = row.role === 'summary' || row.role === 'profile' ? 'system' : row.role
       messages.push({ role, content: row.content })
     }
     recentStmt.free()
@@ -221,7 +221,7 @@ function loadContextForLlm(maxLen) {
     // rows.reverse() — 数组反转，把倒序变正序
     for (const row of rows.reverse()) {
       if (row.role === 'offline') continue
-      const role = row.role === 'summary' ? 'system' : row.role
+      const role = row.role === 'summary' || row.role === 'profile' ? 'system' : row.role
       messages.push({ role, content: row.content })
     }
   }
