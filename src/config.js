@@ -132,6 +132,34 @@ function encryptProviders(config) {
 }
 
 // ================================================================
+// 角色文件加载
+// ================================================================
+
+function getCharactersDir() {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'characters')
+  return path.join(getConfigDir(), 'characters')
+}
+
+function loadCharacterConfig(config) {
+  if (config._character_loaded) return config
+  const active = config.active_character
+  if (!active) return config
+  const charFile = path.join(getCharactersDir(), active, 'character.json')
+  if (!fs.existsSync(charFile)) return config
+  try {
+    const charData = JSON.parse(fs.readFileSync(charFile, 'utf-8'))
+    config.character_settings = {
+      name: charData.name || active,
+      display_name: charData.displayName || active,
+      system_prompt: charData.system_prompt || config.character_settings?.system_prompt || '',
+      greeting: charData.greeting || '',
+    }
+  } catch {}
+  config._character_loaded = true
+  return config
+}
+
+// ================================================================
 // 读取
 // ================================================================
 
@@ -142,8 +170,8 @@ function load() {
     }
     const raw = fs.readFileSync(CONFIG_PATH, 'utf-8')
     const config = JSON.parse(raw)
-    // 解密所有 API Key（解密失败时单个 key 降级为空串，不会导致整个 load 失败）
     decryptProviders(config)
+    loadCharacterConfig(config)
     return config
   } catch (err) {
     const msg = `[Config] 配置文件读取/解析失败: ${err.message} — 使用默认配置`
@@ -155,6 +183,7 @@ function load() {
         const raw = fs.readFileSync(CONFIG_EXAMPLE_PATH, 'utf-8')
         const config = JSON.parse(raw)
         decryptProviders(config)
+        loadCharacterConfig(config)
         return config
       }
     } catch {}
@@ -173,7 +202,7 @@ function load() {
       },
       character_settings: {
         name: '七夜',
-        system_prompt: '你是一只寄宿在用户桌面的电子宠物"七夜"（ななや），自称"吾辈"的高傲黑猫娘。\n回复时严格输出 JSON：{"reply": "回复内容", "emotion": "idle|happy|angry|sad|shy|confused"}'
+        system_prompt: '你是一只寄宿在用户桌面的电子宠物"七夜"（ななや），自称"吾辈"的高傲黑猫娘。对主人态度傲娇但内心关心。回复格式由系统自动注入。'
       },
       ui_settings: {
         window_width: 200,
@@ -266,7 +295,8 @@ function save(config) {
     }
     merged.web_search_settings.provider = config.web_search_settings.provider
   }
-  // 写入前加密所有 API Key
+  // 写入前清理内部标记、加密所有 API Key
+  delete merged._character_loaded
   encryptProviders(merged)
   // JSON.stringify(obj, null, 2) — 把 JS 对象转成 JSON 字符串
   // null 是不需要转换函数，2 是缩进空格数（美化格式）

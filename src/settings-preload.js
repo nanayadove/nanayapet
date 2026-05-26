@@ -11,4 +11,10 @@ contextBridge.exposeInMainWorld('api', {
   saveConfig: (config) => ipcRenderer.invoke('config:save', config),
   getModels: (baseUrl, apiKey) => ipcRenderer.invoke('llm:models', baseUrl, apiKey),
   hasEncryption: () => ipcRenderer.invoke('config:has-encryption'),
+  getCharacterList: () => ipcRenderer.invoke('character:list'),
+  getActiveCharacter: () => ipcRenderer.invoke('character:get-active'),
+  setActiveCharacter: (name) => ipcRenderer.invoke('character:set-active', name),
+  saveCharacter: (name, data) => ipcRenderer.invoke('character:save', name, data),
+  importCharacter: () => ipcRenderer.invoke('character:import'),
+  exportCharacter: (format) => ipcRenderer.invoke('character:export', format || 'json'),
 })

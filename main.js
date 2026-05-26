@@ -25,7 +25,7 @@
 //   const app = electron.app
 //   const BrowserWindow = electron.BrowserWindow
 //   ...以此类推
-const { app, BrowserWindow, ipcMain, safeStorage, Tray, Menu, nativeImage, Notification } = require('electron')
+const { app, BrowserWindow, ipcMain, safeStorage, Tray, Menu, nativeImage, Notification, dialog, protocol } = require('electron')
 
 // require('path') — Node.js 内置模块，处理文件路径
 // path.join() 把多个片段拼成合法路径，自动适配 Windows(`\`) / Linux(`/`)
@@ -42,6 +42,7 @@ const config = require('./src/config')
 const llm = require('./src/llm')
 const db = require('./src/db')
 const tools = require('./src/tools/index')
+const pngCard = require('./src/png-card')
 
 // config.init(safeStorage) — 把 Electron 的 safeStorage 实例传给 config 模块
 // config 模块用它加密/解密 API Key，保证配置文件里不存明文
@@ -62,15 +63,26 @@ function getLogPath() {
   return path.join(dir, 'netpet-error.log')
 }
 
-// pushToUser(channel, data) — 窗口可见时发气泡，最小化时发系统通知
+// pushToUser(channel, data) — 始终发气泡到渲染进程；窗口隐藏时额外发系统通知
 function pushToUser(channel, data) {
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+  // 始终发送 IPC，确保渲染进程收到消息（窗口恢复时能展示）
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, data)
-  } else if (Notification.isSupported()) {
+  }
+
+  // 窗口不可见时，额外发系统通知弹窗
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible() && Notification.isSupported()) {
     const notif = new Notification({
       title: data.label || 'NetPet',
       body: data.reply || data.message || '',
       icon: path.join(__dirname, 'assets', 'idle.png'),
+    })
+    notif.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.show()
+        mainWindow.focus()
+      }
     })
     notif.show()
   }
@@ -485,7 +497,12 @@ ipcMain.handle('config:get', () => config.load())
 
 // config:save — 保存配置
 // _e 是事件对象（下划线前缀表示未使用的参数）
-ipcMain.handle('config:save', (_e, newConfig) => config.save(newConfig))
+ipcMain.handle('config:save', (_e, newConfig) => {
+  config.save(newConfig)
+  startScheduleChecker()
+  startIdleChecker()
+  return { success: true }
+})
 
 // config:has-encryption — 检查操作系统加密是否可用
 ipcMain.handle('config:has-encryption', () => config.isEncryptionAvailable())
@@ -498,24 +515,15 @@ ipcMain.handle('llm:send', async (_event, userText) => {
 
   const pendingSearch = llm.getPendingSearch()
   if (pendingSearch) {
-    const text = userText.trim()
-    const confirmKeywords = ['好', '查', '搜', '可以', 'yes', 'ok', 'sure', '行', '嗯', '对', '要', '搜一下', '查一下']
-    const confirmed = confirmKeywords.some(k => text.includes(k))
-    if (confirmed) {
-      llm.clearPendingSearch()
-      const cfg = config.load()
-      try {
-        const searchResult = await tools.executeTool('web_search', { query: pendingSearch.topic }, cfg)
-        db.saveKnowledge(pendingSearch.topic, searchResult.result, 'web', '')
-        db.saveMessage('user', userText)
-        db.saveMessage('assistant', searchResult.result)
-        return { reply: `已搜索关于「${pendingSearch.topic}」的信息：\n\n${searchResult.result}`, emotion: 'happy' }
-      } catch (err) {
-        logError(err)
-        return { reply: `搜索失败: ${err.message}`, emotion: 'confused' }
-      }
-    }
     llm.clearPendingSearch()
+    const cfg = config.load()
+    // 后台静默搜索，不阻塞用户本次对话
+    tools.executeTool('web_search', { query: pendingSearch.topic }, cfg)
+      .then(searchResult => {
+        db.saveKnowledge(pendingSearch.topic, searchResult.result)
+        console.log(`[Knowledge] 已保存搜索结果: ${pendingSearch.topic}`)
+      })
+      .catch(err => console.error('[Knowledge] 后台搜索失败:', err.message))
   }
 
   const cfg = config.load()
@@ -529,7 +537,7 @@ ipcMain.handle('llm:send', async (_event, userText) => {
     return { reply: result.reply, emotion: result.emotion }
   } catch (err) {
     logError(err)
-    throw err
+    return { reply: '呃...吾辈好像有点混乱喵', emotion: 'confused' }
   }
 })
 
@@ -560,10 +568,179 @@ ipcMain.handle('tools:delete', async (_e, id) => {
 })
 
 // ================================================================
+// 角色管理 IPC
+// ================================================================
+
+function getCharacterDir() {
+  return path.join(app.isPackaged ? process.resourcesPath : __dirname, 'characters')
+}
+
+ipcMain.handle('character:list', async () => {
+  const cDir = getCharacterDir()
+  if (!fs.existsSync(cDir)) return []
+  return fs.readdirSync(cDir, { withFileTypes: true })
+    .filter(d => d.isDirectory())
+    .map(d => {
+      const charFile = path.join(cDir, d.name, 'character.json')
+      if (fs.existsSync(charFile)) {
+        try {
+          const data = JSON.parse(fs.readFileSync(charFile, 'utf-8'))
+          return { name: d.name, displayName: data.displayName || d.name }
+        } catch { return null }
+      }
+      return null
+    })
+    .filter(Boolean)
+})
+
+ipcMain.handle('character:get-active', async () => {
+  const cfg = config.load()
+  const active = cfg.active_character || cfg.character_settings?.name || '七夜'
+  const cDir = getCharacterDir()
+  const charFile = path.join(cDir, active, 'character.json')
+  if (fs.existsSync(charFile)) {
+    return JSON.parse(fs.readFileSync(charFile, 'utf-8'))
+  }
+  return {
+    name: active,
+    displayName: active,
+    system_prompt: cfg.character_settings?.system_prompt || '',
+  }
+})
+
+ipcMain.handle('character:set-active', async (_e, charName) => {
+  const cfg = config.load()
+  cfg.active_character = charName
+  config.save(cfg)
+  return { success: true }
+})
+
+ipcMain.handle('character:save', async (_e, charName, charData) => {
+  const cDir = getCharacterDir()
+  const destDir = path.join(cDir, charName)
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true })
+  const charFile = path.join(destDir, 'character.json')
+  let existing = {}
+  if (fs.existsSync(charFile)) {
+    try { existing = JSON.parse(fs.readFileSync(charFile, 'utf-8')) } catch {}
+  }
+  const merged = { ...existing, ...charData }
+  fs.writeFileSync(charFile, JSON.stringify(merged, null, 2), 'utf-8')
+  return { success: true }
+})
+
+ipcMain.handle('character:import', async () => {
+  const result = await dialog.showOpenDialog({
+    title: '导入角色文件',
+    filters: [
+      { name: '角色文件', extensions: ['png', 'json'] },
+    ],
+    properties: ['openFile'],
+  })
+  if (result.canceled || result.filePaths.length === 0) return { success: false, reason: 'cancelled' }
+
+  const srcPath = result.filePaths[0]
+  const ext = path.extname(srcPath).toLowerCase()
+  let charData
+  let pngData = null
+
+  if (ext === '.png') {
+    try {
+      const buf = fs.readFileSync(srcPath)
+      charData = pngCard.extractCardJson(buf)
+      if (!charData) return { success: false, reason: 'PNG 中未找到角色卡片数据（缺少 ccv3 字段）' }
+      pngData = buf
+    } catch (err) {
+      return { success: false, reason: 'PNG 解析失败: ' + err.message }
+    }
+  } else {
+    try {
+      charData = JSON.parse(fs.readFileSync(srcPath, 'utf-8'))
+    } catch {
+      return { success: false, reason: '文件解析失败，请选择有效的角色文件' }
+    }
+  }
+
+  if (!charData.name) return { success: false, reason: '角色文件缺少 name 字段' }
+
+  const cDir = getCharacterDir()
+  const destDir = path.join(cDir, charData.name)
+  if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true })
+  fs.writeFileSync(path.join(destDir, 'character.json'), JSON.stringify(charData, null, 2), 'utf-8')
+
+  if (pngData) {
+    fs.writeFileSync(path.join(destDir, 'idle.png'), pngData)
+    for (const emotion of ['happy', 'angry', 'sad', 'shy', 'confused']) {
+      const emotionSrc = path.join(path.dirname(srcPath), `${emotion}.png`)
+      if (fs.existsSync(emotionSrc)) {
+        fs.copyFileSync(emotionSrc, path.join(destDir, `${emotion}.png`))
+      }
+    }
+  } else {
+    const srcAssetsDir = path.join(path.dirname(srcPath))
+    for (const emotion of ['idle', 'happy', 'angry', 'sad', 'shy', 'confused']) {
+      const p = path.join(srcAssetsDir, `${emotion}.png`)
+      if (fs.existsSync(p)) {
+        fs.copyFileSync(p, path.join(destDir, `${emotion}.png`))
+      }
+    }
+  }
+
+  return { success: true, name: charData.name, displayName: charData.displayName || charData.name }
+})
+
+ipcMain.handle('character:export', async (_e, format) => {
+  const cfg = config.load()
+  const active = cfg.active_character || cfg.character_settings?.name || '七夜'
+  const cDir = getCharacterDir()
+  const charFile = path.join(cDir, active, 'character.json')
+  let charData
+  if (fs.existsSync(charFile)) {
+    charData = JSON.parse(fs.readFileSync(charFile, 'utf-8'))
+  } else {
+    charData = {
+      name: active,
+      displayName: active,
+      system_prompt: cfg.character_settings?.system_prompt || '',
+    }
+  }
+
+  if (format === 'png') {
+    const idlePath = path.join(cDir, active, 'idle.png')
+    if (!fs.existsSync(idlePath)) return { success: false, reason: `角色 "${active}" 缺少 idle.png 立绘，无法导出 PNG 卡片` }
+
+    const result = await dialog.showSaveDialog({
+      title: '导出角色卡 PNG',
+      defaultPath: `${active}.png`,
+      filters: [{ name: 'PNG 图片', extensions: ['png'] }],
+    })
+    if (result.canceled) return { success: false, reason: 'cancelled' }
+
+    const pngBuf = fs.readFileSync(idlePath)
+    const exportBuf = pngCard.embedCardJson(pngBuf, charData)
+    fs.writeFileSync(result.filePath, exportBuf)
+    return { success: true, path: result.filePath }
+  }
+
+  const result = await dialog.showSaveDialog({
+    title: '导出角色 JSON',
+    defaultPath: `${active}.json`,
+    filters: [{ name: '角色文件', extensions: ['json'] }],
+  })
+  if (result.canceled) return { success: false, reason: 'cancelled' }
+
+  fs.writeFileSync(result.filePath, JSON.stringify(charData, null, 2), 'utf-8')
+  return { success: true, path: result.filePath }
+})
+
+// ================================================================
 // 应用启动
 // ================================================================
 
 // requestSingleInstanceLock() — 保证只运行一个实例
+// Windows 系统通知需要设置 AppUserModelId，否则 Notification 无法弹出
+app.setAppUserModelId('com.netpet.app')
+
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
@@ -579,7 +756,22 @@ if (!gotLock) {
 
   // app.whenReady() — 返回 Promise，当 Electron 完成初始化时 resolve
   app.whenReady().then(() => {
-    // 检查是否需要把明文 API Key 迁移到加密存储
+    protocol.handle('netpet', async (request) => {
+      const filePath = decodeURIComponent(request.url.slice('netpet://'.length))
+      let fullPath = path.join(getCharacterDir(), filePath)
+      if (!fs.existsSync(fullPath)) {
+        fullPath = path.join(getCharacterDir(), '七夜', 'idle.png')
+      }
+      try {
+        const data = await fs.promises.readFile(fullPath)
+        const ext = path.extname(fullPath).toLowerCase()
+        const mimeTypes = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' }
+        return new Response(data, { headers: { 'content-type': mimeTypes[ext] || 'application/octet-stream' } })
+      } catch {
+        return new Response('Not found', { status: 404 })
+      }
+    })
+
     if (config.needsMigration()) {
       try {
         config.migrate()

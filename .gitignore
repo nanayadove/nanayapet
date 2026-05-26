@@ -35,3 +35,8 @@ dist/
 
 # 环境变量（token 等）
 .env
+
+# opencode AI 辅助工具配置
+opencode.json
+AGENTS.md
+.opencode/

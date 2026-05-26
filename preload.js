@@ -79,17 +79,13 @@ contextBridge.exposeInMainWorld('api', {
 
   // ============ 主进程推送监听 ============
 
-  // onScheduleTriggered(callback) — 监听定时提醒触发事件
-  // 这是推送模式(不是请求-响应)，callback 在提醒触发时被调用
-  // ipcRenderer.on(频道, (事件对象, 数据) => callback(数据)) — 注册监听
-  // _event 是事件对象（下划线前缀表示不使用它）
   onScheduleTriggered: (callback) => {
     ipcRenderer.on('schedule:triggered', (_event, data) => callback(data))
   },
 
-  // onProactiveGreeting(callback) — 监听主动问候事件
-  // 当用户长时间离线后重新上线时触发（L3 智能关心）
   onProactiveGreeting: (callback) => {
     ipcRenderer.on('proactive:greeting', (_event, data) => callback(data))
   },
+
+  getCharacterAssetUrl: (characterName, emotion) => `netpet://${encodeURIComponent(characterName)}/${encodeURIComponent(emotion)}.png`,
 })

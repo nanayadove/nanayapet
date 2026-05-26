@@ -58,18 +58,29 @@ async function makeAiModel(apiKey, baseURL, modelName) {
 }
 
 // === LLM 调用（纯 AI SDK） ===
-async function callLLM({ aiModel, messages, temperature, stream }) {
+async function callLLM({ aiModel, messages, temperature, stream, label }) {
   if (!aiModel) throw new Error('AI SDK 模型未就绪')
   const sdk = await aiSdk()
   if (!sdk) throw new Error('AI SDK 不可用')
 
+  const start = Date.now()
+  const phase = label || 'LLM'
+  const labelStr = `[${phase}]`
+
   if (stream) {
+    console.log(`${labelStr} 流式请求开始`)
     const result = sdk.streamText({ model: aiModel, messages, temperature })
     let text = ''
     for await (const chunk of result.textStream) { text += chunk }
+    const elapsed = Date.now() - start
+    console.log(`${labelStr} 流式完成 (${elapsed}ms, ${text.length}字)`)
     return text
   }
+  console.log(`${labelStr} 请求开始`)
   const result = await sdk.generateText({ model: aiModel, messages, temperature })
+  const elapsed = Date.now() - start
+  const usage = result.usage ? ` 输入${result.usage.promptTokens}t 输出${result.usage.completionTokens}t` : ''
+  console.log(`${labelStr} 完成 (${elapsed}ms${usage})`)
   return result.text
 }
 
@@ -128,6 +139,7 @@ async function checkToolCall(config, userText, systemPrompt) {
       messages: [{ role: 'system', content: toolPrompt }, ...recentHistory.slice(-4), { role: 'user', content: `[当前系统时间: ${timeStr}] 用户说: ${userText}` }],
       temperature: 0.1,
       stream: false,
+      label: '工具模型',
     })
     const parsed = JSON.parse(text)
     if (parsed && parsed.tool) { console.log(`[LLM] checkToolCall → ${parsed.tool}`); return { tool: parsed.tool, params: parsed.params || {}, raw: text } }
@@ -153,8 +165,11 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
   if (!prov?.api_key || !prov?.base_url) throw new Error('API 未配置')
 
   const systemPrompt = config.character_settings?.system_prompt || ''
-  let effectivePrompt = systemPrompt.toLowerCase().includes('json') ? systemPrompt : systemPrompt + '\n请以JSON格式回复。'
-  effectivePrompt += '\n如果你在回复中涉及不确定的事实性内容，可在JSON中加入"need_search":true和"search_topic":"关键词"。'
+  const formatLock = '\n\n【回复格式——系统锁定，请勿在角色设定中重复编写】\n你的回复必须以 [emotion=表情] 开头。表情只能从以下六种中选择：idle（默认）、happy（开心）、angry（生气）、sad（伤心）、shy（害羞）、confused（困惑）。\n如需标记已完成的任务，在表情后加 [completed=任务ID1,ID2]。\n如需联网搜索，在表情后加 [need_search=搜索关键词]。\n正确格式示例: [emotion=idle]主人，今天外面的天气不错哦。'
+  const effectivePrompt = systemPrompt
+    .replace(/\n*【回复格式】[\s\S]*/g, '')
+    .replace(/\n*回复时严格输出 JSON[：:][\s\S]*/g, '')
+    + formatLock
   const modelName = prov.model || 'deepseek-v4-flash'
   const summaryInterval = api.summary_interval || 5
   const maxLen = Math.max(api.max_history_length || 10, summaryInterval * 2)
@@ -178,19 +193,18 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
 
   // 自动注入相关事实和知识
   if (!isSystem && userContent) {
-  const relevantFacts = db.searchFactsLike(userContent.slice(0, 200))
-  const relevantKnowledge = db.searchKnowledgeLike(userContent.slice(0, 200))
+  const relevantItems = db.searchKnowledgeBase(userContent.slice(0, 200))
   const ks = config.knowledge_settings || {}
   const autoInject = ks.auto_inject || {}
-  const maxF = autoInject.max_facts ?? 5
-  const maxK = autoInject.max_knowledge ?? 5
-  if ((relevantFacts.length > 0 || relevantKnowledge.length > 0) && autoInject.enabled !== false) {
+  const maxItems = autoInject.max_items ?? 8
+  if (relevantItems.length > 0 && autoInject.enabled !== false) {
     let injection = '[系统: 以下是数据库中与当前话题可能相关的信息]\n'
-    if (relevantFacts.length > 0) {
-      injection += relevantFacts.slice(0, maxF).map(f => `- [${f.category || '事实'}] ${f.content}`).join('\n') + '\n'
-    }
-    if (relevantKnowledge.length > 0) {
-      injection += relevantKnowledge.slice(0, maxK).map(k => `- [知识: ${k.topic}] ${k.content.slice(0, 200)}`).join('\n')
+    let injected = 0
+    for (const item of relevantItems) {
+      if (injected >= maxItems) break
+      const label = item.classification === 'user_profile' ? '用户画像' : (item.classification === 'web' ? '外部知识' : '知识')
+      injection += `- [${label}] ${item.content.slice(0, 200)}\n`
+      injected++
     }
     chatHistory.push({ role: 'system', content: injection })
   }
@@ -204,20 +218,21 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
 
   let answerText
   try {
-    answerText = await callLLM({ aiModel, messages: chatHistory, temperature, stream })
+    answerText = await callLLM({ aiModel, messages: chatHistory, temperature, stream, label: '聊天模型' })
   } catch (err) {
-    errLog(`API 请求失败: ${err.message}`)
-    throw new Error(`API 请求失败: ${err.message}`)
+    const errInfo = `API 请求失败 | model=${modelName} provider=${provName} temp=${temperature} stream=${stream}: ${err.message}`
+    errLog(errInfo)
+    throw new Error(errInfo)
   }
 
-  const result = parseResponse(answerText)
+  const result = parseChatResponse(answerText)
   if (result.completed_tasks) processCompletedTasks(result.completed_tasks)
   if (!isSystem) db.saveMessage('user', finalContent)
   db.saveMessage('assistant', answerText)
 
   const summaryData = db.checkAndSummarize(null, modelName, summaryInterval)
   if (summaryData) {
-    try { await db.doSummarize(api, summaryData) } catch (err) { errLog(`后台总结失败: ${err.message}`) }
+    try { await summarizeMemory(config, summaryData) } catch (err) { errLog(`后台总结失败: ${err.message}`) }
   }
 
   return { reply: result.reply, emotion: result.emotion, need_search: result.need_search, search_topic: result.search_topic }
@@ -231,7 +246,12 @@ async function sendMessage(config, userText) {
   const toolDecision = await checkToolCall(config, userText, config.character_settings?.system_prompt || '')
   if (toolDecision.tool) {
     toolResult = await executeToolCall(config, toolDecision.tool, toolDecision.params)
-    if (toolResult) db.saveMessage('system', `[工具调用: ${toolDecision.tool}] ${toolResult.result}`)
+    if (toolResult) {
+      db.saveMessage('system', `[工具调用: ${toolDecision.tool}] ${toolResult.result}`)
+      if (toolDecision.tool === 'web_search' && toolDecision.params?.query) {
+        db.saveKnowledge(toolDecision.params.query, toolResult.result, 'web', '')
+      }
+    }
   }
   const extraMessages = toolResult ? [{ role: 'system', content: `[系统: 刚才执行了工具 "${toolDecision.tool}"，结果如下]\n${toolResult.result}` }] : []
   const result = await callChatModel(config, extraMessages, userText, false)
@@ -272,6 +292,49 @@ async function fetchModels(baseUrl, apiKey) {
 }
 
 // ================================================================
+// 后台总结记忆
+// ================================================================
+async function summarizeMemory(config, summaryData) {
+  if (!summaryData) return
+
+  const api = config.api_settings || {}
+  const provName = api.summary_provider || ''
+  let sApiKey, sBaseUrl, sModel
+
+  if (provName && provName !== '同对话服务商' && api.providers?.[provName]) {
+    const sumProv = api.providers[provName]
+    sApiKey = sumProv.api_key
+    sBaseUrl = sumProv.base_url
+    sModel = sumProv.model
+  } else {
+    const mainProv = api.providers?.[api.provider || 'deepseek'] || {}
+    sApiKey = mainProv.api_key
+    sBaseUrl = mainProv.base_url
+    sModel = mainProv.model
+  }
+
+  const aiModel = await makeAiModel(sApiKey, sBaseUrl, sModel)
+  if (!aiModel) return
+
+  try {
+    const summaryText = (await callLLM({
+      aiModel,
+      messages: [
+        { role: 'system', content: '你是一个对话总结助手。' },
+        { role: 'user', content: summaryData.prompt }
+      ],
+      temperature: 0.5,
+      stream: false,
+      label: '总结模型',
+    })).trim()
+    db.saveMessage('system', '[SUMMARY] ' + summaryText)
+    console.log('记忆总结已保存:', summaryText.substring(0, 50) + '...')
+  } catch (err) {
+    console.error('后台总结记忆失败:', err.message)
+  }
+}
+
+// ================================================================
 // 知识补全：等待确认状态
 // ================================================================
 let pendingSearch = null
@@ -281,33 +344,36 @@ function setPendingSearch(topic) { pendingSearch = { topic, timestamp: Date.now(
 function clearPendingSearch() { pendingSearch = null }
 
 // ================================================================
-// 知识库模型解析
+// 知识库模型解析（返回 AI SDK model）
 // ================================================================
-function getKnowledgeConfig(config) {
-  const OpenAI = require('openai')
+async function getKnowledgeModel(config) {
   const ks = config.knowledge_settings || {}
   const kProvName = ks.knowledge_provider || ''
   const kModelName = ks.knowledge_model || ''
   const api = config.api_settings || {}
 
+  let apiKey, baseURL, modelName
+
   if (kProvName && kProvName !== '同对话服务商') {
     const prov = api.providers?.[kProvName]
     if (prov?.api_key) {
-      return {
-        client: new OpenAI({ apiKey: prov.api_key, baseURL: prov.base_url }),
-        modelName: kModelName || prov.model,
-        providerName: kProvName,
-      }
+      apiKey = prov.api_key
+      baseURL = prov.base_url
+      modelName = kModelName || prov.model
     }
   }
 
-  const mainProvName = api.provider || 'deepseek'
-  const mainProv = api.providers?.[mainProvName]
-  return {
-    client: new OpenAI({ apiKey: mainProv.api_key, baseURL: mainProv.base_url }),
-    modelName: kModelName || mainProv.model,
-    providerName: mainProvName,
+  if (!apiKey) {
+    const mainProvName = api.provider || 'deepseek'
+    const mainProv = api.providers?.[mainProvName]
+    if (!mainProv?.api_key || !mainProv?.base_url) return null
+    apiKey = mainProv.api_key
+    baseURL = mainProv.base_url
+    modelName = kModelName || mainProv.model
   }
+
+  const kcModelName = modelName
+  return { aiModel: await makeAiModel(apiKey, baseURL, modelName), modelName: kcModelName }
 }
 
 // ================================================================
@@ -333,8 +399,8 @@ async function extractFacts(config) {
   const messages = db.getMessagesForFactExtraction(lastId, 6)
   if (messages.length < 3) return
 
-  const kc = getKnowledgeConfig(config)
-  if (!kc.client) return
+  const km = await getKnowledgeModel(config)
+  if (!km?.aiModel) return
 
   const conversationText = messages.map(m => {
     const roleStr = m.role === 'user' ? '用户' : '助手'
@@ -347,9 +413,22 @@ async function extractFacts(config) {
 - category: 事实分类，如"偏好"、"计划"、"个人信息"、"习惯"、"观点"、"事件"、"关系"等
 - content: 事实内容，用简洁的一句话描述
 - tags: 相关标签数组，如["饮食","猫"]
-- confidence: 置信度0到1之间，越明确越高
+- confidence: 置信度0到1之间，根据明确程度严格评分
 
-只提取明确的事实，不推测。如果没有可提取的事实，返回空数组[]。
+置信度评分标准（务必按此给分，不要一律给0.9-1）：
+- 0.9~1.0：用户直接明确陈述，无歧义。例如"我养了一只猫"、"我最讨厌开会"
+- 0.7~0.8：较明确但带有一定推断。例如"最近总熬夜"暗示熬夜习惯，"想去趟日本"暗示旅行计划
+- 0.5~0.6：模糊暗示，需要结合语境推测。例如"这火锅不错"暗示偏好但不明确，"下次再说吧"暗示可能有计划
+- 0.3~0.4：非常不确定，仅是可能关联。例如"朋友推荐过那个"间接提到但不确认态度
+- 低于0.3的事实不应提取，直接跳过
+
+反例（这些情况应给低分或不提取）：
+- "今天下雨了" → 这是临时状态，不是用户事实，不提取
+- "听说xxx不错" → 不确定是否认同，confidence 0.4
+- "帮我查一下xxx" → 这是指令，不是事实，不提取
+- "我之前好像说过" → 回忆中不确定的内容，confidence 0.5
+
+如果没有可提取的事实，返回空数组[]。
 
 对话内容：
 ${conversationText}
@@ -357,12 +436,13 @@ ${conversationText}
 直接输出JSON数组格式如[{"category":"偏好","content":"用户喜欢吃辣","tags":["饮食"],"confidence":0.9}]，不要有其他文字。`
 
   try {
-    const response = await kc.client.chat.completions.create({
-      model: kc.modelName,
+    const raw = await callLLM({
+      aiModel: km.aiModel,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.1,
+      stream: false,
+      label: '知识模型-事实提取',
     })
-    const raw = response.choices[0].message.content
     let facts = []
     try {
       const parsed = JSON.parse(raw)
@@ -438,7 +518,8 @@ async function generateProfile(config) {
     `[${f.category || '通用'}] ${f.content} (置信度: ${f.confidence || 0.5})`
   ).join('\n')
 
-  const kc = getKnowledgeConfig(config)
+  const km = await getKnowledgeModel(config)
+  if (!km?.aiModel) return
 
   const prompt = `你是一个用户画像生成助手。请根据以下已提取的用户事实，生成一段简洁的用户画像摘要。
 
@@ -454,12 +535,13 @@ ${factsText}
 直接输出画像文本，不要加任何前缀说明。`
 
   try {
-    const response = await kc.client.chat.completions.create({
-      model: kc.modelName,
+    const profileText = (await callLLM({
+      aiModel: km.aiModel,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.5,
-    })
-    const profileText = response.choices[0].message.content.trim()
+      stream: false,
+      label: '知识模型-画像生成',
+    })).trim()
     db.saveMessage('system', '[PROFILE] ' + profileText)
     db.setMeta('last_profile_generation', new Date().toISOString())
     db.setMeta('facts_count_at_last_profile', String(facts.length))
@@ -470,7 +552,7 @@ ${factsText}
 }
 
 // ================================================================
-// JSON 解析（三级容错）
+// 聊天回复解析（标签提取，永不崩溃）
 // ================================================================
 const VALID_EMOTIONS = ['idle', 'happy', 'angry', 'sad', 'shy', 'confused']
 
@@ -481,16 +563,35 @@ function validEmotion(emotion) {
   return 'idle'
 }
 
-function parseResponse(text) {
-  try { const p = JSON.parse(text); return { reply: p.reply || '呃...', emotion: validEmotion(p.emotion), completed_tasks: p.completed_tasks || [], need_search: !!p.need_search, search_topic: p.search_topic || null } } catch {}
-  let bc = 0, st = -1
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '{') { if (st === -1) st = i; bc++ }
-    else if (text[i] === '}') { bc--; if (bc === 0 && st !== -1) { try { const p = JSON.parse(text.slice(st, i+1)); return { reply: p.reply||'呃...', emotion: validEmotion(p.emotion), completed_tasks: p.completed_tasks||[], need_search: !!p.need_search, search_topic: p.search_topic||null } } catch {} st = -1 } }
+function parseChatResponse(text) {
+  let working = (text || '').trim()
+  let emotion = 'idle'
+  let completed_tasks = []
+  let need_search = false
+  let search_topic = null
+
+  const emoM = working.match(/^\[emotion=(\w+)\]\s*/i)
+  if (emoM) {
+    emotion = validEmotion(emoM[1])
+    working = working.slice(emoM[0].length)
+  } else {
+    errLog(`[emotion] 标签缺失，LLM输出前100字: ${text.slice(0, 100)}`)
   }
-  let r = text.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')
-  try { const p = JSON.parse(r); return { reply: p.reply||'呃...', emotion: validEmotion(p.emotion), completed_tasks: p.completed_tasks||[], need_search: !!p.need_search, search_topic: p.search_topic||null } } catch {}
-  throw new Error(`JSON 解析失败: ${text.slice(0, 200)}...`)
+
+  const compM = working.match(/^\[completed=([\d,\s]+)\]\s*/i)
+  if (compM) {
+    completed_tasks = compM[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
+    working = working.slice(compM[0].length)
+  }
+
+  const nsM = working.match(/^\[need_search=([^\]]+)\]\s*/i)
+  if (nsM) {
+    need_search = true
+    search_topic = nsM[1].trim()
+    working = working.slice(nsM[0].length)
+  }
+
+  return { reply: working.trim() || '呃...', emotion, completed_tasks, need_search, search_topic }
 }
 
 module.exports = { sendMessage, sendSystemMessage, fetchModels, getPendingSearch, setPendingSearch, clearPendingSearch }

@@ -35,6 +35,13 @@ const searchKeyStatus = document.getElementById('search-key-status')
 
 // ===== 角色设定页元素 =====
 const inpPrompt = document.getElementById('inp-prompt')
+const selCharacter = document.getElementById('sel-character')
+const inpCharName = document.getElementById('inp-char-name')
+const inpCharDisplay = document.getElementById('inp-char-display')
+const btnImportChar = document.getElementById('btn-import-char')
+const btnExportChar = document.getElementById('btn-export-char')
+const selExportFormat = document.getElementById('sel-export-format')
+const charStatus = document.getElementById('char-status')
 
 // ===== 主动搭话页元素 =====
 const inpProactiveEnabled = document.getElementById('inp-proactive-enabled')
@@ -54,8 +61,7 @@ const inpProfileFacts = document.getElementById('inp-profile-facts')
 const inpProfileHours = document.getElementById('inp-profile-hours')
 const inpProfileMin = document.getElementById('inp-profile-min')
 const inpAutoInject = document.getElementById('inp-auto-inject')
-const inpMaxFacts = document.getElementById('inp-max-facts')
-const inpMaxKnowledge = document.getElementById('inp-max-knowledge')
+const inpMaxItems = document.getElementById('inp-max-items')
 
 // ===== 知识库模型元素 =====
 const selKnowledgeProvider = document.getElementById('sel-knowledge-provider')
@@ -136,6 +142,9 @@ function applyToUI(config) {
 
   // 角色页
   inpPrompt.value = config.character_settings?.system_prompt || ''
+  inpCharName.value = config.character_settings?.name || ''
+  inpCharDisplay.value = config.character_settings?.display_name || config.character_settings?.name || ''
+  loadCharacterList(config.active_character || config.character_settings?.name || '')
 
   // 主动搭话页
   const proactive = config.proactive_settings || {}
@@ -170,16 +179,95 @@ function applyToUI(config) {
   inpProfileMin.value = pg.min_facts || 5
   const ai = ks.auto_inject || {}
   inpAutoInject.checked = ai.enabled !== false
-  inpMaxFacts.value = ai.max_facts ?? 5
-  inpMaxKnowledge.value = ai.max_knowledge ?? 5
+  inpMaxItems.value = ai.max_items ?? 8
 }
+
+// ================================================================
+// 角色管理
+// ================================================================
+
+async function loadCharacterList(activeName) {
+  try {
+    const list = await window.api.getCharacterList()
+    selCharacter.innerHTML = ''
+    let found = false
+    list.forEach(c => {
+      const opt = document.createElement('option')
+      opt.value = c.name
+      opt.textContent = c.displayName || c.name
+      selCharacter.appendChild(opt)
+      if (c.name === activeName) found = true
+    })
+    if (activeName && !found) {
+      const opt = document.createElement('option')
+      opt.value = activeName
+      opt.textContent = activeName + ' (内建)'
+      selCharacter.appendChild(opt)
+    }
+    selCharacter.value = activeName || list[0]?.name || ''
+    charStatus.textContent = activeName ? '已选中' : ''
+  } catch (err) {
+    charStatus.textContent = '加载失败: ' + err.message
+  }
+}
+
+selCharacter.addEventListener('change', async () => {
+  const name = selCharacter.value
+  if (!name) return
+  try {
+    await window.api.setActiveCharacter(name)
+    const cfg = await window.api.getConfig()
+    currentConfig = cfg
+    inpCharName.value = cfg.character_settings?.name || ''
+    inpCharDisplay.value = cfg.character_settings?.display_name || cfg.character_settings?.name || ''
+    inpPrompt.value = cfg.character_settings?.system_prompt || ''
+    charStatus.textContent = '已切换'
+    setTimeout(() => { charStatus.textContent = '已选中' }, 2000)
+  } catch (err) {
+    charStatus.textContent = '切换失败: ' + err.message
+  }
+})
+
+btnImportChar.addEventListener('click', async () => {
+  try {
+    const result = await window.api.importCharacter()
+    if (result.success) {
+      charStatus.textContent = `已导入: ${result.displayName}`
+      await loadCharacterList(result.name)
+      selCharacter.value = result.name
+      await window.api.setActiveCharacter(result.name)
+      const cfg = await window.api.getConfig()
+      currentConfig = cfg
+      inpCharName.value = cfg.character_settings?.name || ''
+      inpCharDisplay.value = cfg.character_settings?.display_name || ''
+      inpPrompt.value = cfg.character_settings?.system_prompt || ''
+    } else if (result.reason !== 'cancelled') {
+      charStatus.textContent = '导入失败: ' + (result.reason || '未知错误')
+    }
+  } catch (err) {
+    charStatus.textContent = '导入失败: ' + err.message
+  }
+})
+
+btnExportChar.addEventListener('click', async () => {
+  try {
+    const format = selExportFormat.value || 'json'
+    const result = await window.api.exportCharacter(format)
+    if (result.success) {
+      charStatus.textContent = '已导出到: ' + result.path
+    } else if (result.reason) {
+      charStatus.textContent = '导出失败: ' + result.reason
+    }
+  } catch (err) {
+    charStatus.textContent = '导出失败: ' + err.message
+  }
+})
 
 // ================================================================
 // 收集配置
 // ================================================================
 function collectFromUI() {
   const provName = selProvider.value
-  // 防守：textarea 为空时保留已有的 system_prompt，防止误覆盖丢失
   const promptValue = inpPrompt.value.trim()
   const existingPrompt = currentConfig.character_settings?.system_prompt || ''
   const finalPrompt = promptValue || existingPrompt
@@ -202,7 +290,7 @@ function collectFromUI() {
       tool_model: inpToolModel.value.trim() || '',
     },
     character_settings: {
-      name: '七夜',
+      name: inpCharName.value.trim() || '七夜',
       system_prompt: finalPrompt
     },
     ui_settings: {
@@ -243,8 +331,7 @@ function collectFromUI() {
       },
       auto_inject: {
         enabled: inpAutoInject.checked,
-        max_facts: parseInt(inpMaxFacts.value) || 5,
-        max_knowledge: parseInt(inpMaxKnowledge.value) || 5,
+        max_items: parseInt(inpMaxItems.value) || 8,
       }
     }
   }
@@ -335,6 +422,14 @@ btnSave.addEventListener('click', async () => {
   const config = collectFromUI()
   try {
     await window.api.saveConfig(config)
+    const activeChar = currentConfig.active_character || selCharacter.value
+    if (activeChar) {
+      await window.api.saveCharacter(activeChar, {
+        name: inpCharName.value.trim() || activeChar,
+        displayName: inpCharDisplay.value.trim() || activeChar,
+        system_prompt: inpPrompt.value.trim() || '',
+      })
+    }
     statusEl.textContent = '配置已保存'
     setTimeout(() => window.close(), 800)
   } catch (err) { statusEl.textContent = '保存失败: ' + err.message }

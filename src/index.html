@@ -24,7 +24,7 @@
        img-src 'self' data: — 允许同源图片和 data: URI（内嵌图片）
        style-src 'self' 'unsafe-inline' — 允许同源样式和内联样式
        script-src 'self' — 只允许同源脚本（不能加载外部 JS） -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: netpet:; style-src 'self' 'unsafe-inline'; script-src 'self';"> 
   <title>NetPet</title>
   <!-- <link rel="stylesheet"> — 引入外部 CSS 样式文件 -->
   <link rel="stylesheet" href="style.css">

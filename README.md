@@ -1,6 +1,6 @@
 # NetPet - 桌面LLM虚拟宠物
 
-> v1.5.0
+> v1.6.0
 
 基于 Electron + JavaScript 的桌面 AI 宠物框架。通过在本地直接调用大语言模型 (LLM) API，打造属于你自己的 AI 桌面伙伴。
 
@@ -9,10 +9,10 @@
 ## 特性
 
 - **Electron 桌面应用**：HTML/CSS 构建的现代 UI，支持透明窗口、可拉伸缩放、拖拽、气泡对话
-- **情绪驱动立绘**：LLM 输出 JSON 格式 `{ reply, emotion }`，自动切换 6 种表情立绘
+- **情绪驱动立绘**：LLM 输出 `[emotion=表情]` 前缀标签，自动切换 6 种表情立绘
 - **独立设置窗口**：可视化配置 API Key、模型、Provider、搜索引擎、流式传输，支持模型列表下拉选择 + 测试连接
 - **SQLite 记忆系统**：自动保存对话历史，支持后台总结压缩长程记忆
-- **角色设定完全解耦**：修改 `config.json` 中的 System Prompt 即可换人设
+- **角色设定完全解耦**：独立角色文件（`characters/<角色名>/character.json`），支持多角色切换、导入/导出、PNG 角色卡
 - **Agent 工具系统**：两步推理架构，LLM 可调用工具（记笔记/设提醒/查询/联网搜索/搜索知识库）
 - **联网搜索**：支持 Tavily / DuckDuckGo / Serper / Anthropic(Claude原生) 四种引擎，可配置切换
 - **知识库系统**：从对话中自动提取用户事实，去重后存入数据库；基于事实生成用户画像，注入后续对话上下文
@@ -62,7 +62,21 @@
 
 ### 3. 自定义角色
 
-设置界面的 **「角色设定」** 标签页可修改 System Prompt，更换角色的性格、语气、口癖。立绘图片替换 `assets/` 文件夹里的 PNG 文件即可。
+设置界面的 **「角色管理」** 标签页可切换/编辑/导入/导出角色。
+
+**角色文件结构**（`characters/<角色名>/`）：
+```
+characters/七夜/
+├── character.json   # 角色设定（name, displayName, system_prompt）
+├── idle.png         # 默认立绘（也是 PNG 角色卡导出底图）
+├── happy.png
+├── angry.png
+├── sad.png
+├── shy.png
+└── confused.png
+```
+
+**PNG 角色卡**：导出时角色 JSON 会嵌入 `idle.png` 的 `tEXt` 块（ccv3 键），兼容 SillyTavern 规范。导入 PNG 时自动解析 JSON + 复制立绘。立绘缺失时自动回退到 `七夜/idle.png`。
 
 ---
 
@@ -128,11 +142,21 @@ v1.4.1 起桌面右下角有托盘图标（猫猫头），双击即可恢复。�
 
 ```
 netpet/
-├── main.js              # Electron 主进程（窗口管理 + IPC + 定时器）
+├── main.js              # Electron 主进程（窗口管理 + IPC + 定时器 + netpet:// 协议）
 ├── preload.js           # IPC 桥接
 ├── config.json          # 用户配置（需从 config.example.json 复制）
 ├── config.example.json  # 配置模板（含完整角色预设，可安全提交）
 ├── memory.db            # SQLite 对话数据库（本地生成，不入库）
+├── characters/          # 角色文件目录
+│   └── 七夜/            #   每个角色一个文件夹
+│       ├── character.json  #   角色设定
+│       ├── idle.png        #   默认立绘
+│       ├── happy.png
+│       ├── angry.png
+│       ├── sad.png
+│       ├── shy.png
+│       └── confused.png
+├── assets/              # 全局立绘素材（角色缺失时回退）
 ├── src/
 │   ├── index.html       # 宠物窗口 UI
 │   ├── style.css        # UI 样式
@@ -140,19 +164,19 @@ netpet/
 │   ├── settings.html    # 设置窗口 UI（侧边栏导航，7 个配置页）
 │   ├── settings.js      # 设置窗口逻辑
 │   ├── settings-preload.js # 设置窗口 IPC 桥接
-│   ├── config.js        # 配置读写 + API Key 加密存储
+│   ├── config.js        # 配置读写 + API Key 加密存储 + 角色文件加载
 │   ├── llm.js           # LLM 通信核心（AI SDK 双引擎 + 两步推理 + 知识库管道）
 │   ├── ai-provider.js   # AI SDK 动态 import 包装层
 │   ├── tool-prompt.js   # 工具提取模型提示词模板
 │   ├── db.js            # SQLite 记忆存储 + 工具 CRUD + 知识库 CRUD
+│   ├── png-card.js      # PNG tEXt 块读写（角色卡嵌入/提取）
 │   └── tools/           # 工具模块
 │       ├── index.js     # 工具路由
 │       ├── write-file.js
 │       ├── read-file.js
 │       ├── schedule.js
-│       ├── web-search.js    # 联网搜索（Tavily/DDG/Serper/Anthropic）
-│       └── search-knowledge.js  # 知识库搜索
-├── assets/              # 立绘素材 (PNG)
+│       ├── web-search.js
+│       └── search-knowledge.js
 ├── 启动桌宠.bat         # 一键启动（双击即可）
 ├── 安装依赖.bat         # 一键安装依赖（首次双击，之后不用）
 ├── ROADMAP.md           # 演进路线图
@@ -163,22 +187,15 @@ netpet/
 
 对话自动存入 SQLite，每 N 轮对话自动总结为背景记忆，防止长对话 Token 溢出。同时维护 `tools` 表记录待办、笔记、提醒等工具数据。
 
-## JSON 响应格式
+## 回复格式
 
-LLM 每次回复需要输出以下 JSON：
+LLM 回复由系统强制注入 `[emotion=表情]` 前缀标签，表情为以下六种之一：`idle`、`happy`、`angry`、`sad`、`shy`、`confused`。
 
-```json
-{
-  "reply": "回复文本，包含颜文字和角色语气",
-  "emotion": "情绪标签：[idle, happy, angry, sad, shy, confused]",
-  "completed_tasks": [1, 3],
-  "need_search": false,
-  "search_topic": ""
-}
-```
+可选附加标签：
+- `[completed=ID1,ID2]` — 标记已完成的任务 ID
+- `[need_search=关键词]` — 表示需要联网搜索
 
-- `completed_tasks`：可选，当用户确认某件事已完成时，填入对应任务的数据库 ID
-- `need_search`：可选，当 LLM 对回复中的事实性内容不确定时设为 true，`search_topic` 为建议搜索的关键词
+示例：`[emotion=idle]主人又在摸鱼了，吾辈都看在眼里。`
 
 ## 进阶开发
 

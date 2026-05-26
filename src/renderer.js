@@ -29,9 +29,11 @@ let isLoading = false
 
 // ===== 启动时加载配置 =====
 // 窗口尺寸由 CSS flex + 比例自适应，不再硬编码像素
+let characterName = '七夜'
+
 window.api.getConfig().then(config => {
-  const name = config.character_settings?.name || '七夜喵'
-  showBubble(`只是一只${name}。`)
+  characterName = config.character_settings?.name || '七夜'
+  showBubble(`只是一只${config.character_settings?.display_name || characterName}。`)
 }).catch(() => {
   showBubble('配置加载失败，请点击 设置 API Key')
 })
@@ -77,11 +79,13 @@ inputField.addEventListener('keydown', (e) => {
 // emotion 是 LLM 返回的情绪标签，对应 assets/ 目录下的 PNG 图片
 // idle → assets/idle.png, happy → assets/happy.png, ...
 function updateImage(emotion) {
-  // ../assets/ — 相对路径，因为 HTML 在 src/ 目录下
-  petImage.src = `../assets/${emotion}.png`
-  // onerror — 图片加载失败时触发的回调
+  const charUrl = window.api.getCharacterAssetUrl(characterName, emotion)
+  const fallbackUrl = 'netpet://%E4%B8%83%E5%A4%9C/idle.png'
+  const img = new Image()
+  img.onload = () => { petImage.src = charUrl }
+  img.onerror = () => { petImage.src = fallbackUrl }
+  img.src = charUrl
   petImage.onerror = () => {
-    // alt 属性是图片加载失败时显示的替代文字
     petImage.alt = `【缺少素材: ${emotion}.png】`
   }
 }
