@@ -14,6 +14,7 @@ const tools = {
   schedule:        require('./schedule'),
   web_search:      require('./web-search'),
   search_knowledge: require('./search-knowledge'),
+  remember:        require('./remember'),
 }
 
 async function executeTool(toolName, params, config) {

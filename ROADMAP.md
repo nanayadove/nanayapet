@@ -145,8 +145,8 @@
 - [x] 新增 `remember` 工具：tool-prompt.js 声明 + tools/remember.js 实现
 - [x] `tool-prompt.js` 更新工具描述
 
-### 5.5 导出与辅助
-- [ ] 对话历史导出：Markdown/JSON 格式
+### 5.5 导出与辅助 [等待阶段六表结构稳定后实施]
+- [ ] 对话历史导出：按 Session 导出 Markdown/JSON
 - [ ] 知识库导出：按 classification 分类导出 JSON
 - [ ] 格式转换：CSV→JSON 导入，Markdown 按标题切片导入
 - [ ] 批量编辑表格视图
@@ -176,6 +176,15 @@
 - [x] `callLLM` 增加 `label` 参数，区分聊天模型/工具模型/知识模型/总结模型
 - [x] 每次调用来带日志：请求开始 → 完成（耗时 + token 用量 + 字符数）
 - [x] 报错日志带 model / provider / temperature / stream 上下文
+
+### B5. 聊天模型标签泄漏 [已修复 2026-05-27]
+- [x] `[need_search]` 和 `[completed]` 标签混入聊天模型自然语言输出，散落在正文各处
+- [x] 责任分离：聊天模型只输出 `[emotion=xxx]`，工具决策（completed_tasks）交还工具模型
+- [x] `formatLock` 收紧为只提及 `[emotion=xxx]`，移除 need_search/completed 指令
+- [x] `parseChatResponse` 简化为只提取 `[emotion=xxx]`
+- [x] `tool-prompt.js` 响应格式增加 `completed_tasks` 字段
+- [x] `checkToolCall` 解析并执行 `completed_tasks`
+- [x] 清理 `main.js` / `llm.js` 中废弃的 `pendingSearch` 流程
 ---
 
 ## 🔜 阶段七：后端 Docker 化 + 前后端分离 [规划中]
@@ -262,9 +271,9 @@
 
 ---
 
-## 🔮 阶段六：角色系统独立化 [规划中]
+## 🔜 阶段六：数据层重构 + 角色记忆系统 [施工中]
 
-> 2026-05-26 讨论记录：当前角色设定（名字、性格、语气、立绘等）散落在 `config.json` 的 `character_settings` 和 `assets/` 中，无法管理多角色。且角色自身缺乏独立记忆——当前对话记忆只看最近 N 条消息，没有角色对用户/对世界的长期认知。决定将角色抽象为独立实体，每个角色绑定专属记忆库。
+> **2026-05-27 修订**：施工前梳理发现 `messages` 表职责混乱——对话消息、摘要、画像、工具结果、下线记录全部混在一张表，靠 `role` 字段和 `LIKE '[XXX]%'` 魔数匹配区分类型。参照 SillyTavern 的 Chats→Messages 数据模型，决定在进行 Session 和角色记忆开发之前，先拆表整理数据层。
 
 ### 6.1 角色设定独立 [已完成]
 
@@ -274,50 +283,147 @@
 - [x] 自定义 `netpet://` 协议，渲染进程通过协议加载角色立绘（打包/开发均可用）
 - [x] 设置界面"角色管理"Tab：角色下拉切换 + 编辑 + 导入/导出
 - [x] 启动时根据 `active_character` 加载角色文件，回退到内建 `character_settings`
-- [x] PNG 角色卡：导出时将角色 JSON 嵌入 `idle.png` 的 `tEXt` chunk（ccv3 键，兼容 SillyTavern 规范）
-- [x] PNG 角色卡：导入时自动解析 PNG 中的 JSON，同时复制立绘
+- [x] PNG 角色卡：导出时嵌入 `tEXt` chunk（ccv3 键，SillyTavern 兼容）
 - [x] 导出支持 JSON / PNG 卡两种格式
 
-### 6.2 角色长久记忆库
+### 6.2 Messages 表拆分 [已完成 2026-05-27]
 
-- [ ] 角色记忆独立于用户事实：新增 `character_memories` 表
-- [ ] schema：`id` / `character_id` / `category`（user_relation / world_knowledge / self_awareness / conversation_summary）/ `content` / `confidence` / `created_at` / `updated_at`
-- [ ] 角色对用户的认知（user_relation）：用户姓名、关系程度、互动风格、已知偏好快照
-- [ ] 角色对世界的认知（world_knowledge）：角色从对话/搜索中学到的外部知识，独立于用户知识库
-- [ ] 角色自我认知（self_awareness）：角色对自身的理解（名字、设定、用户如何看待自己等），对话中自然沉淀
-- [ ] 对话摘要（conversation_summary）：每次对话关闭时自动生成摘要存入记忆，下次启动时加载为上下文
-- [ ] 记忆衰减 + 强化机制：经常提及的信息 confidence 自动增加，长期未提及的自然淡化
-- [ ] 角色记忆与用户知识库互相独立，通过 confidence 权重竞争决定注入上下文的优先级
+> 核心思路：参照 SillyTavern 的 Chat → Messages 模型，将 `messages` 一锅炖拆为 4 张职责明确的表。
 
-### 6.3 对话新开（Session 管理）
+**现状诊断** — `messages` 表承载了 6 种不同性质的数据：
 
-- [ ] 新增 `sessions` 表：`id` / `title`（自动摘要生成）/ `character_id` / `created_at` / `last_active_at` / `is_active` / `summary`
-- [ ] 每次对话是一个 Session，绑定一个角色
-- [ ] 用户可手动"新开对话"：当前 Session 归档生成摘要 → 清空聊天上下文 → 保留角色记忆和用户知识库
-- [ ] 切换角色时自动新开 Session（或提示是否保留当前会话）
-- [ ] Session 历史列表：查看/恢复/删除过往对话
-- [ ] 恢复历史 Session 时加载上次摘要作为起始上下文
+| 数据类型 | role | 检索方式 | 问题 |
+|---------|------|---------|------|
+| 用户发言 | `user` | — | |
+| LLM 回复 | `assistant` | — | |
+| 对话摘要 | `system` | `LIKE '[SUMMARY]%'` | 数据与元数据不分 |
+| 用户画像 | `system` | `LIKE '[PROFILE]%'` | 画像应归知识库 |
+| 工具执行 | `system` | — | 辅助日志混入对话 |
+| 下线记录 | `offline` | — | 辅助日志混入对话 |
 
-### 6.4 角色与记忆库绑定
-
-- [ ] 角色 JSON 文件包含 `memory_db` 字段，指向该角色的记忆库（默认为 `characters/<角色名>/memory.db`）
-- [ ] 同一角色在不同 Session 间共享记忆库，不同角色记忆库完全隔离
-- [ ] 用户知识库（`knowledge` 表，即阶段五重构后的统一知识库）为全局共享，不随角色切换而清空
-- [ ] 角色删除时提示是否同时删除记忆库
-- [ ] 角色导出时可选是否包含记忆库
-
-### 6.5 数据流梳理
+**目标结构**：
 
 ```
-启动 → 加载活跃角色设定 + 角色记忆库 + 最新 Session
-    → 注入角色 system prompt（来自角色 JSON）
-    → 注入角色记忆摘要（来自 character_memories）
-    → 注入用户画像（来自 knowledge 表 user_profile 分类）
-    → 注入当前 Session 历史消息
-    → LLM 对话
+现在: messages (6种数据混在一起)
+       ↓
+优化后:
+  sessions           ← 对话容器 (ST 的 Chat)
+  messages           ← 纯对话消息，归属 session_id
+  knowledge_base     ← 已有，不动 (user_profile/taught/web)
+  events             ← 工具执行 / 下线 / 画像生成 等辅助记录
+```
 
-对话结束/新开：
-    → 生成对话摘要 → 存入 character_memories（conversation_summary）
-    → Session 归档，清空消息上下文
-    → 角色记忆和用户知识库保留
+#### 6.2.1 新表 Schema
+
+**sessions** — 对话容器
+```
+id            INTEGER PRIMARY KEY AUTOINCREMENT
+character_id  TEXT NOT NULL
+title         TEXT          -- LLM 自动生成标题
+summary       TEXT          -- 归档时生成摘要（取代 [SUMMARY] 魔数）
+is_active     INTEGER DEFAULT 1
+created_at    DATETIME
+last_active_at DATETIME
+```
+
+**messages** — 纯对话消息
+```
+id            INTEGER PRIMARY KEY AUTOINCREMENT
+session_id    INTEGER NOT NULL REFERENCES sessions(id)
+role          TEXT NOT NULL      -- user / assistant / system
+content       TEXT NOT NULL
+created_at    DATETIME
+```
+
+**events** — 系统事件日志
+```
+id            INTEGER PRIMARY KEY AUTOINCREMENT
+session_id    INTEGER            -- 可选，关联 session
+type          TEXT NOT NULL      -- tool_call / schedule_fire / offline / profile_update / summary / fact_extraction
+content       TEXT NOT NULL
+metadata      TEXT               -- JSON，存额外信息
+created_at    DATETIME
+```
+
+#### 6.2.2 具体任务
+
+- [x] `db.js` 新增 `sessions` / `events` 两张表的 CREATE 和 CRUD 接口
+- [x] 迁移脚本 `migrateV2()`：
+  - 旧 messages → 按角色创建默认 session，逐条迁入新 messages
+  - `[SUMMARY]` 记录 → 写入对应 session.summary 字段
+  - `[PROFILE]` 记录 → 提取内容存到 `events`（type=profile_update），保持 knowledge_base 最新画像不变
+  - `offline` 记录 → 迁入 `events`（type=offline）
+  - 工具调用 system 消息 → 迁入 `events`（type=tool_call）
+- [x] 升级 `loadContextForLlm(sessionId, maxLen)` — 改为从 sessions + messages 组装，消除 `LIKE '[SUMMARY]%'` 魔数查询
+- [x] 升级 `saveMessage(role, content)` → `saveMessage(sessionId, role, content)`
+- [x] `llm.js` 中所有读写 messages 的调用适配新签名
+- [x] `main.js` IPC handler 适配：`chat:send` 传入 session_id，初始化时获取 active session
+- [x] 迁移后手动验证：对话功能、总结、画像、工具调用无回归
+
+### 6.3 Session 管理（对话新开/归档/恢复）[已完成 2026-05-27]
+
+> 依赖：6.2 完成
+
+- [x] 用户可手动"新开对话"：当前 Session 归档生成 summary → 新建 Session → 清空上下文，保留角色记忆和知识库
+- [x] 设置界面新增"对话管理"Tab：
+  - Session 列表：按时间倒序，显示 title / character / 消息数 / 时间
+  - 切换 / 恢复 / 删除 Session
+- [x] IPC 通道：session:list / session:create / session:switch / session:delete / session:get-active
+- [ ] 切换角色时自动新开 Session（弹窗确认）
+- [ ] 恢复历史 Session 时加载 summary 作为起始上下文注入
+- [ ] 活跃 Session 的消息在内存中缓存，切换时释放
+
+### 6.4 角色长久记忆库
+
+> 依赖：6.2 完成
+
+- [ ] 新增 `character_memories` 表
+- [ ] Schema：
+  ```
+  id             INTEGER PRIMARY KEY AUTOINCREMENT
+  character_id   TEXT NOT NULL
+  category       TEXT NOT NULL    -- user_relation / world_knowledge / self_awareness / conversation_summary
+  content        TEXT NOT NULL
+  confidence     REAL DEFAULT 0.5
+  created_at     DATETIME
+  updated_at     DATETIME
+  ```
+- [ ] `user_relation`：角色对用户的认知（称呼、关系、互动风格、已知偏好）
+- [ ] `world_knowledge`：角色从对话/搜索中学到的外部知识
+- [ ] `self_awareness`：角色对自身的理解（名字、设定、用户如何看待自己）
+- [ ] `conversation_summary`：Session 归档时生成摘要存入，下次启动时加载为上下文
+- [ ] 记忆衰减 + 强化：复用或参考 `knowledge_base` 的 confidence 机制
+- [ ] 与用户知识库互相独立，通过 confidence 权重竞争决定注入上下文优先级
+
+### 6.5 角色与记忆绑定
+
+- [ ] 角色 `character.json` 增加 `memory_db` 字段，指向角色专属记忆库路径
+- [ ] 同一角色不同 Session 共享记忆库，不同角色记忆完全隔离
+- [ ] 知识库（`knowledge_base`）为全局共享，不随角色切换清空
+- [ ] 角色删除/导出时可选是否包含记忆数据
+
+### 6.6 数据流终态
+
+```
+启动
+  → 加载活跃角色设定 (character.json → system_prompt)
+  → 加载角色记忆 (character_memories → conversation_summary + user_relation)
+  → 恢复活跃 Session (sessions.is_active=1 → messages 历史)
+  → 注入用户画像 (knowledge_base → 画像摘要)
+  → 组装 context → LLM 对话
+
+对话中
+  → messages 记录每条消息 (归属 session_id)
+  → 后台：事实提取 → knowledge_base
+  → 后台：画像生成 → knowledge_base / events
+
+新开对话
+  → 当前 Session 归档 (is_active=0, 生成 summary)
+  → 角色记忆追加 conversation_summary → character_memories
+  → 新建 Session (is_active=1) → 清空对话上下文
+  → 角色记忆 + 知识库保留
+
+导出
+  → 按 Session 导出对话历史 (Markdown/JSON)  [→ 5.5]
+  → 按 classification 导出知识库 (JSON)      [→ 5.5]
 ```

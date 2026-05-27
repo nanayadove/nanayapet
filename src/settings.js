@@ -96,6 +96,10 @@ document.querySelectorAll('.tab').forEach(tab => {
     // tab.dataset.page 读取 data-page 属性值（如 "page-api"）
     // 显示对应内容页
     document.getElementById(tab.dataset.page).classList.add('active')
+
+    if (tab.dataset.page === 'page-sessions') {
+      loadSessionList()
+    }
   })
 })
 
@@ -469,5 +473,75 @@ function updateSearchKeyHint() {
   inpSearchKey.value = prov.api_key || ''
 }
 selSearchProvider.addEventListener('change', updateSearchKeyHint)
+
+// ===== 对话管理 (Session) =====
+
+async function loadSessionList() {
+  const listEl = document.getElementById('session-list')
+  const infoEl = document.getElementById('active-session-info')
+  try {
+    const sessions = await window.api.getSessionList()
+    const active = await window.api.getActiveSession()
+
+    if (active) {
+      infoEl.textContent = `当前活跃：${active.title || '未命名'} · ${active.messageCount || 0} 条消息 · 角色: ${active.characterId}`
+    } else {
+      infoEl.textContent = '当前活跃：无 (请新建对话)'
+    }
+
+    if (sessions.length === 0) {
+      listEl.innerHTML = '<div style="padding:20px;text-align:center;color:#999;font-size:13px;">暂无历史对话</div>'
+      return
+    }
+
+    listEl.innerHTML = sessions.map(s => {
+      const isActive = s.isActive ? 'background:#e8f5e9;border-left:3px solid #4CAF50;' : 'border-left:3px solid transparent;'
+      const timeStr = s.lastActiveAt ? new Date(s.lastActiveAt).toLocaleString('zh-CN') : ''
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px;margin-bottom:4px;border-radius:5px;${isActive}background:#f9f9fb;">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:bold;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.title || '未命名'}</div>
+            <div style="font-size:11px;color:#999;">${s.characterId} · ${s.messageCount} 条 · ${timeStr}</div>
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0;">
+            ${!s.isActive ? `<button data-action="switch" data-id="${s.id}" style="padding:4px 10px;border:1px solid #2196F3;background:white;color:#2196F3;border-radius:3px;cursor:pointer;font-size:12px;">切换</button>` : ''}
+            <button data-action="delete" data-id="${s.id}" style="padding:4px 8px;border:1px solid #f44336;background:white;color:#f44336;border-radius:3px;cursor:pointer;font-size:12px;" ${s.isActive ? 'disabled title="不能删除活跃会话"' : ''}>删除</button>
+          </div>
+        </div>
+      `
+    }).join('')
+
+    // 绑定按钮事件
+    listEl.querySelectorAll('[data-action="switch"]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = parseInt(btn.dataset.id)
+        await window.api.switchSession(id)
+        statusEl.textContent = '已切换对话'
+        loadSessionList()
+      })
+    })
+    listEl.querySelectorAll('[data-action="delete"]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = parseInt(btn.dataset.id)
+        if (!confirm('确定删除此对话吗？消息记录将被永久删除。')) return
+        await window.api.deleteSession(id)
+        statusEl.textContent = '已删除对话'
+        loadSessionList()
+      })
+    })
+  } catch (err) {
+    listEl.innerHTML = `<div style="padding:20px;text-align:center;color:#f44336;font-size:13px;">加载失败: ${err.message}</div>`
+  }
+}
+
+document.getElementById('btn-new-session').addEventListener('click', async () => {
+  const result = await window.api.createSession()
+  if (result.success) {
+    statusEl.textContent = '已创建新对话'
+    loadSessionList()
+  } else {
+    statusEl.textContent = '创建失败: ' + result.error
+  }
+})
 
 loadConfig()

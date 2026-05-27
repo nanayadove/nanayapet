@@ -145,6 +145,7 @@
     <button class="tab" data-page="page-knowledge"><span class="tab-icon">📚</span> 知识库</button>
     <button class="tab" data-page="page-character"><span class="tab-icon">🎭</span> 角色设定</button>
     <button class="tab" data-page="page-chat"><span class="tab-icon">💬</span> 主动搭话</button>
+    <button class="tab" data-page="page-sessions"><span class="tab-icon">📋</span> 对话管理</button>
   </nav>
 
   <!-- 右侧内容 -->
@@ -433,6 +434,25 @@
           例如：基础15% + 每轮+10% → 第1轮15%、第2轮25%、依此类推直至触发<br>
           只要用户发言，概率立即重置回基础值
         </div>
+      </div>
+    </div>
+
+    <!-- ===== 对话管理 ===== -->
+    <div id="page-sessions" class="page">
+      <h3>对话管理</h3>
+      <div class="tip" style="margin-bottom:12px;">会话 (Session) 是对话的容器。新建会话会清空当前聊天上下文，但保留角色记忆和知识库。</div>
+
+      <div style="display:flex; gap:6px; margin-bottom:12px;">
+        <button id="btn-new-session" style="flex:1; padding:7px; border:1px solid #4CAF50; background:white; color:#4CAF50; border-radius:5px; cursor:pointer; font-size:13px;">＋ 新开对话</button>
+      </div>
+
+      <div id="active-session-info" style="padding:8px; background:#e8f5e9; border-radius:5px; margin-bottom:12px; font-size:12px; color:#333;">
+        当前活跃：加载中...
+      </div>
+
+      <h4 style="font-size:13px; color:#666; margin-bottom:6px;">历史对话</h4>
+      <div id="session-list" style="max-height:300px; overflow-y:auto;">
+        <div style="padding:20px; text-align:center; color:#999; font-size:13px;">加载中...</div>
       </div>
     </div>
   </main>

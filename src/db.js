@@ -119,11 +119,59 @@ async function getDb() {
   `)
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS knowledge_base (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      classification TEXT NOT NULL DEFAULT 'user_profile',
+      category TEXT,
+      content TEXT NOT NULL,
+      tags TEXT DEFAULT '[]',
+      confidence REAL DEFAULT 0.5,
+      source_msg_id INTEGER,
+      source TEXT,
+      source_url TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
       value TEXT
     )
   `)
+
+  // 迁移：旧 facts + knowledge → 统一 knowledge_base
+  migrateToUnifiedKnowledge()
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id TEXT NOT NULL,
+      title TEXT,
+      summary TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      last_active_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER,
+      type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      metadata TEXT DEFAULT '{}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  try { db.run('ALTER TABLE messages ADD COLUMN session_id INTEGER') } catch {}
+  try { db.run('ALTER TABLE sessions ADD COLUMN last_summarized_msg_id INTEGER') } catch {}
+
+  // 迁移：messages 表拆分 (v1 → v2)
+  if (!getMeta('schema_v2')) migrateSchemaV2()
 
   // 把建表后的数据库存盘
   saveDb()
@@ -148,107 +196,65 @@ function saveDb() {
 // 对话消息 CRUD
 // ================================================================
 
-// saveMessage(角色, 内容) — 保存一条对话消息
-// role: 'user' | 'assistant' | 'system' | 'summary'
-function saveMessage(role, content) {
-  // db.prepare(sql) — 编译一条 SQL 语句，返回一个 Statement 对象
-  // 用 ? 做占位符，后续 bind() 绑定参数，防止 SQL 注入
-  const stmt = db.prepare('INSERT INTO messages (role, content) VALUES (?, ?)')
-  // stmt.run([参数...]) — 绑定参数并执行 SQL
-  // [role, content] 按顺序替换上面的两个 ?
-  stmt.run([role, content])
-  // stmt.free() — 释放 Statement 占用的内存
-  // sql.js 需要手动释放，否则会内存泄漏
+// saveMessage(sessionId, 角色, 内容) — 保存一条对话消息
+// sessionId: 归属的会话 ID
+// role: 'user' | 'assistant' | 'system'
+function saveMessage(sessionId, role, content) {
+  const stmt = db.prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)')
+  stmt.run([sessionId, role, content])
   stmt.free()
-  // 每次写入后立即存盘，保证数据不丢失
   saveDb()
 }
 
-// loadContextForLlm(maxLen) — 加载最近对话，供 LLM 上下文使用
+// loadContextForLlm(sessionId, maxLen) — 加载指定 session 的最近对话
+// sessionId: 会话 ID
 // 返回 [{role, content}, ...] 格式的消息数组
-// 如果有总结，先加载总结，再加载总结之后的对话
-function loadContextForLlm(maxLen) {
-  // 查找最近一条总结
-  // ORDER BY id DESC LIMIT 1 — 按 ID 倒序取第一条（最新的）
-  const summaryStmt = db.prepare(
-    "SELECT id, content FROM messages WHERE content LIKE '[SUMMARY]%' ORDER BY id DESC LIMIT 1"
-  )
-  // stmt.step() — 执行查询，返回 true 表示取到一行，false 表示没更多行了
-  // 必须先调 step()，再调 getAsObject() 才能拿到数据
-  summaryStmt.step()
-  // stmt.getAsObject() — 把当前行转成 JS 对象 {id: 1, content: "..."}
-  const summaryRow = summaryStmt.getAsObject()
-  summaryStmt.free()
+// 如果有 session.summary，先注入 summary，再无 summary 部分的最近消息
+function loadContextForLlm(sessionId, maxLen) {
+  if (!sessionId) { const rows = []; return rows }
+  const sessionStmt = db.prepare('SELECT summary FROM sessions WHERE id = ?')
+  sessionStmt.bind([sessionId])
+  const sessionRow = sessionStmt.step() ? sessionStmt.getAsObject() : null
+  sessionStmt.free()
 
-  // messages 数组是最终返回给 LLM 的对话历史
   const messages = []
 
-  if (summaryRow && summaryRow.id) {
-    // 有总结的情况：先放总结，再放总结之后的对话
-    messages.push({
-      role: 'system',
-      content: summaryRow.content
-    })
-    // 查询 ID 大于总结 ID 的所有消息（即总结之后的新消息）
-    const recentStmt = db.prepare(
-      'SELECT role, content FROM messages WHERE id > ? ORDER BY id ASC LIMIT ?'
-    )
-    // stmt.bind([参数...]) — 绑定 SQL 中的 ? 占位符
-    recentStmt.bind([summaryRow.id, maxLen])
-    // while (stmt.step()) — 循环取所有行，每调一次 step() 前进一行
-    while (recentStmt.step()) {
-      const row = recentStmt.getAsObject()
-      if (row.role === 'offline') continue
-      const role = row.role === 'summary' || row.role === 'profile' ? 'system' : row.role
-      messages.push({ role, content: row.content })
-    }
-    recentStmt.free()
-  } else {
-    const recentStmt = db.prepare(
-      'SELECT role, content FROM messages ORDER BY id DESC LIMIT ?'
-    )
-    recentStmt.bind([maxLen])
-    // 因为 SQL 是倒序取的（DESC），需要先收集再反转（reverse）恢复正序
-  const rows = []
-  while (recentStmt.step()) {
-    const row = recentStmt.getAsObject()
-    if (row.role === 'offline') continue
-    const role = row.role === 'summary' ? 'system' : row.role
-    rows.push(row)
+  if (sessionRow && sessionRow.summary) {
+    messages.push({ role: 'system', content: sessionRow.summary })
   }
-    recentStmt.free()
-    // rows.reverse() — 数组反转，把倒序变正序
-    for (const row of rows.reverse()) {
-      if (row.role === 'offline') continue
-      const role = row.role === 'summary' || row.role === 'profile' ? 'system' : row.role
-      messages.push({ role, content: row.content })
-    }
 
+  const stmt = db.prepare(
+    'SELECT role, content FROM messages WHERE session_id = ? ORDER BY id ASC LIMIT ?'
+  )
+  stmt.bind([sessionId, maxLen])
+  while (stmt.step()) {
+    const row = stmt.getAsObject()
+    messages.push({ role: row.role, content: row.content })
   }
+  stmt.free()
+
   return messages
 }
+
 
 // ================================================================
 // 记忆总结：防止对话太长导致 LLM 上下文超出限制
 // ================================================================
 
-// 统计自上次总结以来的消息数量
-function getUnsummarizedCount() {
-  // 找最近一条总结的 ID
-  const summaryStmt = db.prepare(
-    "SELECT id FROM messages WHERE content LIKE '[SUMMARY]%' ORDER BY id DESC LIMIT 1"
-  )
-  summaryStmt.step()
-  const summaryRow = summaryStmt.getAsObject()
-  summaryStmt.free()
+// 统计指定 session 自上次总结以来的消息数量
+function getUnsummarizedCount(sessionId) {
+  const sessionStmt = db.prepare('SELECT last_summarized_msg_id FROM sessions WHERE id = ?')
+  sessionStmt.bind([sessionId])
+  const sessionRow = sessionStmt.step() ? sessionStmt.getAsObject() : null
+  sessionStmt.free()
 
   let countStmt
-  if (summaryRow && summaryRow.id) {
-    // count(*) 统计行数
-    countStmt = db.prepare("SELECT count(*) as cnt FROM messages WHERE id > ?")
-    countStmt.bind([summaryRow.id])
+  if (sessionRow && sessionRow.last_summarized_msg_id) {
+    countStmt = db.prepare('SELECT count(*) as cnt FROM messages WHERE session_id = ? AND id > ?')
+    countStmt.bind([sessionId, sessionRow.last_summarized_msg_id])
   } else {
-    countStmt = db.prepare("SELECT count(*) as cnt FROM messages")
+    countStmt = db.prepare('SELECT count(*) as cnt FROM messages WHERE session_id = ?')
+    countStmt.bind([sessionId])
   }
 
   countStmt.step()
@@ -257,25 +263,24 @@ function getUnsummarizedCount() {
   return result.cnt
 }
 
-// 获取自上次总结以来的所有消息
-function getUnsummarizedMessages() {
-  const summaryStmt = db.prepare(
-    "SELECT id FROM messages WHERE content LIKE '[SUMMARY]%' ORDER BY id DESC LIMIT 1"
-  )
-  summaryStmt.step()
-  const summaryRow = summaryStmt.getAsObject()
-  summaryStmt.free()
+// 获取指定 session 自上次总结以来的所有消息
+function getUnsummarizedMessages(sessionId) {
+  const sessionStmt = db.prepare('SELECT last_summarized_msg_id FROM sessions WHERE id = ?')
+  sessionStmt.bind([sessionId])
+  const sessionRow = sessionStmt.step() ? sessionStmt.getAsObject() : null
+  sessionStmt.free()
 
   let selectStmt
-  if (summaryRow && summaryRow.id) {
+  if (sessionRow && sessionRow.last_summarized_msg_id) {
     selectStmt = db.prepare(
-      'SELECT role, content FROM messages WHERE id > ? ORDER BY id ASC'
+      'SELECT role, content FROM messages WHERE session_id = ? AND id > ? ORDER BY id ASC'
     )
-    selectStmt.bind([summaryRow.id])
+    selectStmt.bind([sessionId, sessionRow.last_summarized_msg_id])
   } else {
     selectStmt = db.prepare(
-      'SELECT role, content FROM messages ORDER BY id ASC'
+      'SELECT role, content FROM messages WHERE session_id = ? ORDER BY id ASC'
     )
+    selectStmt.bind([sessionId])
   }
 
   const rows = []
@@ -288,16 +293,14 @@ function getUnsummarizedMessages() {
 }
 
 // 检查是否需要总结，返回 {prompt, messages} 或 null
-function checkAndSummarize(client, model, summaryInterval) {
+function checkAndSummarize(sessionId, summaryInterval) {
   try {
-    const unsummarizedCount = getUnsummarizedCount()
-    // summaryInterval * 2：间隔 × 2 是触发阈值
-    // 例如间隔 5 意味着累积 10 条未总结消息时触发总结
+    const unsummarizedCount = getUnsummarizedCount(sessionId)
     if (unsummarizedCount < summaryInterval * 2) {
       return null
     }
 
-    const unsummarizedMsgs = getUnsummarizedMessages()
+    const unsummarizedMsgs = getUnsummarizedMessages(sessionId)
     let summaryPrompt = '请以第三人称客观视角（使用"用户"和"AI"/"桌宠"作为主语）将以下对话总结为一段简短的背景记忆，保留核心事件、双方的状态和情感态度，字数不超过200字。直接输出总结文本即可：\n\n'
 
     for (const msg of unsummarizedMsgs) {
@@ -309,63 +312,6 @@ function checkAndSummarize(client, model, summaryInterval) {
   } catch (err) {
     console.error('检查总结失败:', err.message)
     return null
-  }
-}
-
-// doSummarize(apiConfig, summaryData) — 调 LLM 生成总结并存入数据库
-// 异步函数，用 await 等待 LLM API 返回
-async function doSummarize(apiConfig, summaryData) {
-  if (!summaryData) return
-
-  // OpenAI 是 npm 包 openai 的入口类
-  // 它实现了标准的 OpenAI API 客户端，可以连接任何兼容 OpenAI 接口的服务
-  const OpenAI = require('openai')
-
-  // 判断用哪个服务商的模型做总结
-  // summary_provider 是设置里的"后台总结服务商"字段
-  const provName = apiConfig.summary_provider || ''
-  let sApiKey, sBaseUrl, sModel
-
-  if (provName && provName !== '同对话服务商' && apiConfig.providers?.[provName]) {
-    // 如果指定了独立的总结服务商，用它的配置
-    const sumProv = apiConfig.providers[provName]
-    sApiKey = sumProv.api_key
-    sBaseUrl = sumProv.base_url
-    sModel = sumProv.model
-  } else {
-    // 否则复用在对话 API 的服务商（同对话服务商）
-    const mainProv = apiConfig.providers?.[apiConfig.provider || 'deepseek'] || {}
-    sApiKey = mainProv.api_key
-    sBaseUrl = mainProv.base_url
-    sModel = mainProv.model
-  }
-
-  // 创建 OpenAI 客户端实例
-  // apiKey: API 密钥（用于请求认证）
-  // baseURL: API 接口地址（不同服务商的地址不同）
-  const client = new OpenAI({ apiKey: sApiKey, baseURL: sBaseUrl })
-
-  try {
-    // client.chat.completions.create() — 调用 LLM 对话 API
-    // model: 模型名
-    // messages: 对话消息数组 [{role, content}, ...]
-    // temperature: 0-2，越高越随机，越低越稳定
-    const res = await client.chat.completions.create({
-      model: sModel,
-      messages: [
-        { role: 'system', content: '你是一个对话总结助手。' },
-        { role: 'user', content: summaryData.prompt }
-      ],
-      temperature: 0.5,
-    })
-
-    // res.choices[0].message.content — LLM 返回的文本内容
-    const summaryText = res.choices[0].message.content.trim()
-    // 把总结存入 messages 表，role='summary'
-    saveMessage('system', '[SUMMARY] ' + summaryText)
-    console.log('记忆总结已保存:', summaryText.substring(0, 50) + '...')
-  } catch (err) {
-    console.error('后台总结记忆失败:', err.message)
   }
 }
 
@@ -510,22 +456,33 @@ function setMeta(key, value) {
 }
 
 // ================================================================
-// 事实 (facts) CRUD
+// 统一知识库 (knowledge_base) CRUD
 // ================================================================
+// v1.5→v1.6: facts + knowledge 合并为 knowledge_base 表
+// classification: 'user_profile' | 'taught' | 'web'
 
-function saveFact(category, content, tags, confidence, sourceMsgId) {
+function saveKnowledgeItem({ classification, category, content, tags, confidence, source_msg_id, source, source_url }) {
   const stmt = db.prepare(
-    'INSERT INTO facts (category, content, tags, confidence, source_msg_id) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO knowledge_base (classification, category, content, tags, confidence, source_msg_id, source, source_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   )
-  stmt.run([category || null, content, JSON.stringify(tags || []), confidence != null ? confidence : 0.5, sourceMsgId || null])
+  stmt.run([
+    classification || 'user_profile',
+    category || null,
+    content,
+    JSON.stringify(tags || []),
+    confidence != null ? confidence : 0.5,
+    source_msg_id || null,
+    source || null,
+    source_url || null
+  ])
   const id = db.exec('SELECT last_insert_rowid() as id')[0].values[0][0]
   stmt.free()
   saveDb()
   return id
 }
 
-function updateFactConfidence(id, delta, decayRate) {
-  const readStmt = db.prepare("SELECT confidence, updated_at FROM facts WHERE id = ?")
+function updateKnowledgeConfidence(id, delta, decayRate) {
+  const readStmt = db.prepare("SELECT confidence, updated_at FROM knowledge_base WHERE id = ?")
   readStmt.bind([id])
   if (!readStmt.step()) { readStmt.free(); return }
   const row = readStmt.getAsObject()
@@ -540,18 +497,18 @@ function updateFactConfidence(id, delta, decayRate) {
   newConf = Math.max(0, Math.min(newConf, 1.0))
 
   if (newConf < 0.05) {
-    const delStmt = db.prepare("DELETE FROM facts WHERE id = ?")
+    const delStmt = db.prepare("DELETE FROM knowledge_base WHERE id = ?")
     delStmt.run([id])
     delStmt.free()
   } else {
-    const updateStmt = db.prepare("UPDATE facts SET confidence = ?, updated_at = datetime('now') WHERE id = ?")
+    const updateStmt = db.prepare("UPDATE knowledge_base SET confidence = ?, updated_at = datetime('now') WHERE id = ?")
     updateStmt.run([newConf, id])
     updateStmt.free()
   }
   saveDb()
 }
 
-function findSimilarFact(content, threshold) {
+function findSimilarItem(content, threshold, classification) {
   const thresh = threshold != null ? threshold : 0.7
   const searchText = (content || '').slice(0, 100).replace(/[%_]/g, '')
   if (!searchText) return null
@@ -561,8 +518,14 @@ function findSimilarFact(content, threshold) {
   const seenIds = new Set()
 
   for (const kw of keywords) {
-    const stmt = db.prepare("SELECT * FROM facts WHERE content LIKE ? AND content != ''")
-    stmt.bind([`%${kw}%`])
+    let sql = "SELECT * FROM knowledge_base WHERE content LIKE ? AND content != ''"
+    const params = [`%${kw}%`]
+    if (classification) {
+      sql += ' AND classification = ?'
+      params.push(classification)
+    }
+    const stmt = db.prepare(sql)
+    stmt.bind(params)
     while (stmt.step()) {
       const row = stmt.getAsObject()
       if (!seenIds.has(row.id)) {
@@ -596,68 +559,147 @@ function findSimilarFact(content, threshold) {
   }
 
   if (bestScore >= thresh && bestMatch) {
-    return { fact: bestMatch, similarity: Math.round(bestScore * 100) / 100 }
+    return { item: bestMatch, similarity: Math.round(bestScore * 100) / 100 }
   }
   return null
 }
 
-function searchFactsLike(query) {
+function searchKnowledgeBase(query, classification) {
   const q = (query || '').replace(/[%_]/g, '')
   if (!q) return []
   const like = `%${q}%`
-  const stmt = db.prepare(
-    "SELECT * FROM facts WHERE (content LIKE ? OR category LIKE ? OR tags LIKE ?) ORDER BY confidence DESC LIMIT 10"
-  )
-  stmt.bind([like, like, like])
+  let sql = 'SELECT * FROM knowledge_base WHERE (content LIKE ? OR category LIKE ? OR tags LIKE ?)'
+  const params = [like, like, like]
+  if (classification) {
+    sql += ' AND classification = ?'
+    params.push(classification)
+  }
+  sql += ' ORDER BY confidence DESC LIMIT 10'
+  const stmt = db.prepare(sql)
+  stmt.bind(params)
   const rows = []
   while (stmt.step()) { rows.push(stmt.getAsObject()) }
   stmt.free()
   return rows
+}
+
+function getAllKnowledgeByClassification(classification) {
+  let sql = 'SELECT * FROM knowledge_base WHERE 1=1'
+  const params = []
+  if (classification) {
+    const classes = Array.isArray(classification) ? classification : [classification]
+    sql += ' AND classification IN (' + classes.map(() => '?').join(',') + ')'
+    params.push(...classes)
+  }
+  sql += ' ORDER BY id DESC'
+  const stmt = db.prepare(sql)
+  stmt.bind(params)
+  const rows = []
+  while (stmt.step()) { rows.push(stmt.getAsObject()) }
+  stmt.free()
+  return rows
+}
+
+// ================================================================
+// 向后兼容封装（facts/knowledge 接口 → knowledge_base）
+// ================================================================
+
+function saveFact(category, content, tags, confidence, sourceMsgId) {
+  return saveKnowledgeItem({
+    classification: 'user_profile',
+    category, content, tags, confidence,
+    source_msg_id: sourceMsgId
+  })
+}
+
+function updateFactConfidence(id, delta, decayRate) {
+  return updateKnowledgeConfidence(id, delta, decayRate)
+}
+
+function findSimilarFact(content, threshold) {
+  const result = findSimilarItem(content, threshold, 'user_profile')
+  if (!result) return null
+  return { fact: result.item, similarity: result.similarity }
+}
+
+function searchFactsLike(query) {
+  return searchKnowledgeBase(query, 'user_profile')
 }
 
 function getAllFacts() {
-  const stmt = db.prepare('SELECT * FROM facts ORDER BY id DESC')
-  const rows = []
-  while (stmt.step()) { rows.push(stmt.getAsObject()) }
-  stmt.free()
-  return rows
+  return getAllKnowledgeByClassification('user_profile')
 }
 
-// ================================================================
-// 知识 (knowledge) CRUD
-// ================================================================
-
 function saveKnowledge(topic, content, source, sourceUrl) {
-  const stmt = db.prepare(
-    'INSERT INTO knowledge (topic, content, source, source_url) VALUES (?, ?, ?, ?)'
-  )
-  stmt.run([topic, content, source || 'web', sourceUrl || null])
-  const id = db.exec('SELECT last_insert_rowid() as id')[0].values[0][0]
-  stmt.free()
-  saveDb()
-  return id
+  return saveKnowledgeItem({
+    classification: 'web',
+    category: topic,
+    content,
+    source: source || 'web',
+    source_url: sourceUrl || null
+  })
 }
 
 function searchKnowledgeLike(query) {
-  const q = (query || '').replace(/[%_]/g, '')
-  if (!q) return []
-  const like = `%${q}%`
-  const stmt = db.prepare(
-    "SELECT * FROM knowledge WHERE (topic LIKE ? OR content LIKE ?) ORDER BY id DESC LIMIT 10"
-  )
-  stmt.bind([like, like])
-  const rows = []
-  while (stmt.step()) { rows.push(stmt.getAsObject()) }
-  stmt.free()
-  return rows
+  return searchKnowledgeBase(query, 'web')
 }
 
 function getAllKnowledge() {
-  const stmt = db.prepare('SELECT * FROM knowledge ORDER BY id DESC')
-  const rows = []
-  while (stmt.step()) { rows.push(stmt.getAsObject()) }
-  stmt.free()
-  return rows
+  return getAllKnowledgeByClassification('web')
+}
+
+// ================================================================
+// 迁移：旧 facts + knowledge → 统一 knowledge_base
+// ================================================================
+function migrateToUnifiedKnowledge() {
+  const hasMigrated = getMeta('knowledge_unified')
+  if (hasMigrated) {
+    // 迁移完成后可安全删除旧表
+    try { db.run('DROP TABLE IF EXISTS facts') } catch {}
+    try { db.run('DROP TABLE IF EXISTS knowledge') } catch {}
+    return
+  }
+
+  let factCount = 0, knowCount = 0
+
+  try {
+    const stmt1 = db.prepare('SELECT * FROM facts')
+    while (stmt1.step()) {
+      const f = stmt1.getAsObject()
+      saveKnowledgeItem({
+        classification: 'user_profile',
+        category: f.category,
+        content: f.content,
+        tags: typeof f.tags === 'string' ? JSON.parse(f.tags) : (f.tags || []),
+        confidence: f.confidence,
+        source_msg_id: f.source_msg_id
+      })
+      factCount++
+    }
+    stmt1.free()
+  } catch (e) { /* facts 表可能不存在 */ }
+
+  try {
+    const stmt2 = db.prepare('SELECT * FROM knowledge')
+    while (stmt2.step()) {
+      const k = stmt2.getAsObject()
+      saveKnowledgeItem({
+        classification: 'web',
+        category: k.topic,
+        content: k.content,
+        source: k.source || 'web',
+        source_url: k.source_url || null
+      })
+      knowCount++
+    }
+    stmt2.free()
+  } catch (e) { /* knowledge 表可能不存在 */ }
+
+  try { db.run('DROP TABLE IF EXISTS facts') } catch {}
+  try { db.run('DROP TABLE IF EXISTS knowledge') } catch {}
+
+  setMeta('knowledge_unified', '1')
+  console.log(`[Migration] 统一知识库迁移完成: ${factCount} 条用户画像 + ${knowCount} 条外部知识`)
 }
 
 // ================================================================
@@ -696,27 +738,230 @@ function getLatestMessageId() {
 }
 
 // ================================================================
-// 下线记录
+// 下线记录 (events 表)
 // ================================================================
 
 function saveOfflineRecord() {
   const timestamp = new Date().toISOString()
-  saveMessage('offline', `[系统记录: 下线] ${timestamp}`)
+  const stmt = db.prepare("INSERT INTO events (type, content) VALUES ('offline', ?)")
+  stmt.run([`[系统记录: 下线] ${timestamp}`])
+  stmt.free()
+  saveDb()
 }
 
 function getLastOfflineRecord() {
-  const stmt = db.prepare("SELECT content, timestamp FROM messages WHERE role = 'offline' ORDER BY id DESC LIMIT 1")
+  const stmt = db.prepare("SELECT content, created_at as timestamp FROM events WHERE type = 'offline' ORDER BY id DESC LIMIT 1")
   const result = stmt.step() ? stmt.getAsObject() : null
   stmt.free()
   return result
 }
 
-// 加载最新画像
+// ================================================================
+// 用户画像 (meta 表)
+// ================================================================
+
 function getLatestProfile() {
-  const stmt = db.prepare("SELECT content FROM messages WHERE content LIKE '[PROFILE]%' ORDER BY id DESC LIMIT 1")
+  const content = getMeta('latest_profile')
+  return content ? { content } : null
+}
+
+function setLatestProfile(content) {
+  setMeta('latest_profile', content)
+}
+
+// ================================================================
+// Session CRUD
+// ================================================================
+
+function createSession(characterId, title) {
+  db.run("UPDATE sessions SET is_active = 0 WHERE is_active = 1")
+  const stmt = db.prepare(
+    'INSERT INTO sessions (character_id, title, is_active) VALUES (?, ?, 1)'
+  )
+  stmt.run([characterId, title || '新对话'])
+  stmt.free()
+  const id = db.exec('SELECT last_insert_rowid() as id')[0].values[0][0]
+  saveDb()
+  return id
+}
+
+function getActiveSession() {
+  const stmt = db.prepare('SELECT * FROM sessions WHERE is_active = 1 ORDER BY id DESC LIMIT 1')
   const result = stmt.step() ? stmt.getAsObject() : null
   stmt.free()
   return result
+}
+
+function getSessionList() {
+  const stmt = db.prepare('SELECT * FROM sessions ORDER BY last_active_at DESC')
+  const rows = []
+  while (stmt.step()) { rows.push(stmt.getAsObject()) }
+  stmt.free()
+  return rows
+}
+
+function switchSession(sessionId) {
+  db.run("UPDATE sessions SET is_active = 0 WHERE is_active = 1")
+  const stmt = db.prepare("UPDATE sessions SET is_active = 1, last_active_at = datetime('now') WHERE id = ?")
+  stmt.bind([sessionId])
+  stmt.step()
+  stmt.free()
+  saveDb()
+}
+
+function deleteSession(sessionId) {
+  let stmt = db.prepare('DELETE FROM messages WHERE session_id = ?')
+  stmt.bind([sessionId])
+  stmt.step()
+  stmt.free()
+  stmt = db.prepare('DELETE FROM sessions WHERE id = ?')
+  stmt.bind([sessionId])
+  stmt.step()
+  stmt.free()
+  saveDb()
+}
+
+function archiveSession(sessionId) {
+  const stmt = db.prepare("UPDATE sessions SET is_active = 0, last_active_at = datetime('now') WHERE id = ?")
+  stmt.bind([sessionId])
+  stmt.step()
+  stmt.free()
+  saveDb()
+}
+
+function getSessionMessageCount(sessionId) {
+  const stmt = db.prepare('SELECT count(*) as cnt FROM messages WHERE session_id = ?')
+  stmt.bind([sessionId])
+  stmt.step()
+  const result = stmt.getAsObject()
+  stmt.free()
+  return result.cnt
+}
+
+function getLatestMessageIdForSession(sessionId) {
+  const stmt = db.prepare('SELECT MAX(id) as maxId FROM messages WHERE session_id = ?')
+  stmt.bind([sessionId])
+  stmt.step()
+  const result = stmt.getAsObject()
+  stmt.free()
+  return result.maxId || 0
+}
+
+function updateSessionSummary(sessionId, summaryText) {
+  const stmt = db.prepare("UPDATE sessions SET summary = ? WHERE id = ?")
+  stmt.run([summaryText, sessionId])
+  stmt.free()
+  const latestMsgId = getLatestMessageIdForSession(sessionId)
+  db.run('UPDATE sessions SET last_summarized_msg_id = ? WHERE id = ?', [latestMsgId, sessionId])
+  saveDb()
+}
+
+// ================================================================
+// Events CRUD
+// ================================================================
+
+function saveEvent(sessionId, type, content, metadata) {
+  const stmt = db.prepare(
+    'INSERT INTO events (session_id, type, content, metadata) VALUES (?, ?, ?, ?)'
+  )
+  stmt.run([sessionId || null, type, content, JSON.stringify(metadata || {})])
+  stmt.free()
+  saveDb()
+}
+
+function getEventByType(type, limit) {
+  const stmt = db.prepare(
+    `SELECT * FROM events WHERE type = ? ORDER BY id DESC LIMIT ?`
+  )
+  stmt.bind([type, limit || 50])
+  const rows = []
+  while (stmt.step()) { rows.push(stmt.getAsObject()) }
+  stmt.free()
+  return rows
+}
+
+// ================================================================
+// Schema v2 迁移：messages 表拆分为 sessions + messages + events
+// ================================================================
+function migrateSchemaV2() {
+  try {
+    const charName = getMeta('active_character_name') || '七夜'
+
+    let stmt = db.prepare("INSERT INTO sessions (character_id, title, is_active) VALUES (?, '默认对话', 1)")
+    stmt.bind([charName])
+    stmt.step()
+    stmt.free()
+    const sessionId = db.exec('SELECT last_insert_rowid() as id')[0].values[0][0]
+
+    const result = db.exec('SELECT id, role, content FROM messages ORDER BY id ASC')
+    const allMsgs = result[0] ? result[0].values : []
+
+    const specialIds = []
+    let countSummary = 0, countProfile = 0, countOffline = 0, countTool = 0
+
+    for (const row of allMsgs) {
+      const id = row[0]
+      const role = row[1] || ''
+      const content = row[2] || ''
+
+      if (role === 'offline') {
+        stmt = db.prepare("INSERT INTO events (type, content) VALUES ('offline', ?)")
+        stmt.bind([content])
+        stmt.step()
+        stmt.free()
+        specialIds.push(id)
+        countOffline++
+      } else if (content.startsWith('[SUMMARY]')) {
+        stmt = db.prepare("INSERT INTO events (session_id, type, content) VALUES (?, 'summary', ?)")
+        stmt.bind([sessionId, content])
+        stmt.step()
+        stmt.free()
+        stmt = db.prepare('UPDATE sessions SET summary = ? WHERE id = ?')
+        stmt.bind([content, sessionId])
+        stmt.step()
+        stmt.free()
+        stmt = db.prepare('UPDATE sessions SET last_summarized_msg_id = ? WHERE id = ?')
+        stmt.bind([id, sessionId])
+        stmt.step()
+        stmt.free()
+        specialIds.push(id)
+        countSummary++
+      } else if (content.startsWith('[PROFILE]')) {
+        stmt = db.prepare("INSERT INTO events (session_id, type, content) VALUES (?, 'profile_update', ?)")
+        stmt.bind([sessionId, content])
+        stmt.step()
+        stmt.free()
+        setMeta('latest_profile', content)
+        specialIds.push(id)
+        countProfile++
+      } else if (role === 'system' && content.startsWith('[工具调用:')) {
+        stmt = db.prepare("INSERT INTO events (session_id, type, content) VALUES (?, 'tool_call', ?)")
+        stmt.bind([sessionId, content])
+        stmt.step()
+        stmt.free()
+        specialIds.push(id)
+        countTool++
+      }
+    }
+
+    if (specialIds.length > 0) {
+      const placeholders = specialIds.map(() => '?').join(',')
+      stmt = db.prepare(`DELETE FROM messages WHERE id IN (${placeholders})`)
+      stmt.bind(specialIds)
+      stmt.step()
+      stmt.free()
+    }
+
+    stmt = db.prepare('UPDATE messages SET session_id = ? WHERE session_id IS NULL')
+    stmt.bind([sessionId])
+    stmt.step()
+    stmt.free()
+
+    setMeta('schema_v2', '1')
+    console.log(`[Migration] Schema v2 迁移完成: session=${sessionId}, 迁移 ${specialIds.length} 条 (summary=${countSummary} profile=${countProfile} offline=${countOffline} tool=${countTool})`)
+  } catch (err) {
+    console.error('[Migration] Schema v2 迁移失败:', err.message || err)
+  }
 }
 
 // module.exports = { ... }
@@ -729,7 +974,6 @@ module.exports = {
   getUnsummarizedCount,
   getUnsummarizedMessages,
   checkAndSummarize,
-  doSummarize,
   saveTool,
   getToolsByType,
   getToolById,
@@ -749,10 +993,29 @@ module.exports = {
   saveKnowledge,
   searchKnowledgeLike,
   getAllKnowledge,
+  saveKnowledgeItem,
+  updateKnowledgeConfidence,
+  findSimilarItem,
+  searchKnowledgeBase,
+  getAllKnowledgeByClassification,
+  migrateToUnifiedKnowledge,
   getMessagesForFactExtraction,
   getUnprocessedFactCount,
   getLatestMessageId,
   getLatestProfile,
+  setLatestProfile,
   saveOfflineRecord,
   getLastOfflineRecord,
+  saveEvent,
+  getEventByType,
+  createSession,
+  getActiveSession,
+  getSessionList,
+  switchSession,
+  deleteSession,
+  archiveSession,
+  getSessionMessageCount,
+  getLatestMessageIdForSession,
+  updateSessionSummary,
+  migrateSchemaV2,
 }

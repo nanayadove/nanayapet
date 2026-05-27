@@ -1,51 +1,55 @@
 /**
  * ===== search-knowledge.js — 知识库搜索工具 =====
  *
- * 搜索 facts 表（用户事实）和 knowledge 表（外部知识）。
- * 支持 LIKE 模糊匹配。
+ * 搜索统一 knowledge_base 表。
+ * 支持按 classification 过滤。
  *
- * @param {object} params — { query: 搜索关键词 }
+ * @param {object} params — { query: 搜索关键词, classification?: 'user_profile'|'taught'|'web' }
  * @returns {{ success: boolean, result: string, data?: object }}
  */
 const db = require('../db')
 
 function execute(params) {
-  const { query } = params
+  const { query, classification } = params
 
   if (!query || !query.trim()) {
     return { success: false, result: '需要提供 query 参数（搜索关键词）' }
   }
 
-  const facts = db.searchFactsLike(query)
-  const knowledge = db.searchKnowledgeLike(query)
+  const items = db.searchKnowledgeBase(query, classification || null)
+
+  if (items.length === 0) {
+    return {
+      success: true,
+      result: `搜索 "${query}": 未找到相关信息`,
+      data: { items: [] }
+    }
+  }
 
   const parts = [`搜索: "${query}"`]
-  let found = false
 
-  if (facts.length > 0) {
-    parts.push('\n【已知事实】')
-    facts.forEach((f, i) => {
-      parts.push(`${i + 1}. [${f.category || '事实'}] ${f.content} (置信度: ${f.confidence || 0.5})`)
-    })
-    found = true
+  // 按 classification 分组展示
+  const groups = {}
+  for (const item of items) {
+    const cls = item.classification || 'user_profile'
+    if (!groups[cls]) groups[cls] = []
+    groups[cls].push(item)
   }
 
-  if (knowledge.length > 0) {
-    parts.push('\n【相关知识】')
-    knowledge.forEach((k, i) => {
-      parts.push(`${i + 1}. ${k.topic}: ${k.content.slice(0, 200)}`)
+  const labels = { user_profile: '用户画像', taught: '用户教学', web: '外部知识' }
+  for (const [cls, group] of Object.entries(groups)) {
+    parts.push(`\n【${labels[cls] || cls}】`)
+    group.forEach((item, i) => {
+      const confStr = item.confidence ? ` (置信度: ${item.confidence})` : ''
+      const catStr = item.category ? `[${item.category}] ` : ''
+      parts.push(`${i + 1}. ${catStr}${item.content.slice(0, 200)}${confStr}`)
     })
-    found = true
-  }
-
-  if (!found) {
-    parts.push('\n未找到相关信息')
   }
 
   return {
     success: true,
     result: parts.join('\n'),
-    data: { facts, knowledge }
+    data: { items }
   }
 }
 

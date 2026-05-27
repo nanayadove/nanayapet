@@ -99,13 +99,12 @@ function buildPendingContext() {
   const todos = db.getToolsByType('todo', 'active')
   const schedules = db.getToolsByType('schedule', 'active')
   if (todos.length === 0 && schedules.length === 0) return null
-  let text = '\n[当前待办事项]\n'
+  let text = '\n[当前待办事项 — 仅供参考，无需主动提及]\n'
   for (const t of todos) text += `☐ [${t.id}] ${t.label || '(待办)'} — ${t.content || ''}\n`
   for (const s of schedules) {
     const timeStr = s.trigger_at ? new Date(s.trigger_at).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : ''
     text += `☐ [${s.id}] ${s.label || '提醒'} — ${s.content || ''} (提醒${timeStr ? ', 触发于 ' + timeStr : ''})\n`
   }
-  text += '\n如果用户确认某件事已经做了，在回复的 completed_tasks 数组里填对应的 ID。\n'
   return { role: 'system', content: text }
 }
 
@@ -117,7 +116,7 @@ function processCompletedTasks(tasks) {
 // ================================================================
 // 步骤一：工具提取
 // ================================================================
-async function checkToolCall(config, userText, systemPrompt) {
+async function checkToolCall(config, userText, systemPrompt, sessionId) {
   const api = config.api_settings || {}
   const provName = api.tool_provider || api.provider || 'deepseek'
   const prov = api.providers?.[provName]
@@ -126,7 +125,7 @@ async function checkToolCall(config, userText, systemPrompt) {
 
   const charName = config.character_settings?.name || '七夜喵'
   const toolPrompt = buildToolPrompt(charName, getCurrentToolsContext())
-  const recentHistory = db.loadContextForLlm(6)
+  const recentHistory = db.loadContextForLlm(sessionId, 6)
   const now = new Date()
   const timeStr = now.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'long' })
 
@@ -142,6 +141,7 @@ async function checkToolCall(config, userText, systemPrompt) {
       label: '工具模型',
     })
     const parsed = JSON.parse(text)
+    if (parsed && parsed.completed_tasks) processCompletedTasks(parsed.completed_tasks)
     if (parsed && parsed.tool) { console.log(`[LLM] checkToolCall → ${parsed.tool}`); return { tool: parsed.tool, params: parsed.params || {}, raw: text } }
     return { tool: null, params: null, raw: text }
   } catch (err) { errLog(`工具提取失败: ${err.message}`); return { tool: null, params: null } }
@@ -157,7 +157,7 @@ async function executeToolCall(config, toolName, params) {
 // ================================================================
 // 步骤二：主聊天模型
 // ================================================================
-async function callChatModel(config, extraMessages, userContent, isSystem) {
+async function callChatModel(config, extraMessages, userContent, isSystem, sessionId) {
   await dbReady
   const api = config.api_settings || {}
   const provName = api.provider || 'deepseek'
@@ -165,7 +165,7 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
   if (!prov?.api_key || !prov?.base_url) throw new Error('API 未配置')
 
   const systemPrompt = config.character_settings?.system_prompt || ''
-  const formatLock = '\n\n【回复格式——系统锁定，请勿在角色设定中重复编写】\n你的回复必须以 [emotion=表情] 开头。表情只能从以下六种中选择：idle（默认）、happy（开心）、angry（生气）、sad（伤心）、shy（害羞）、confused（困惑）。\n如需标记已完成的任务，在表情后加 [completed=任务ID1,ID2]。\n如需联网搜索，在表情后加 [need_search=搜索关键词]。\n正确格式示例: [emotion=idle]主人，今天外面的天气不错哦。'
+  const formatLock = '\n\n【回复格式——系统锁定，请勿在角色设定中重复编写】\n你的回复必须以 [emotion=表情] 开头，表情后直接换行写正文。表情只能从六种中选择：idle（默认）、happy（开心）、angry（生气）、sad（伤心）、shy（害羞）、confused（困惑）。\n格式示例:\n[emotion=idle]\n主人，今天外面的天气不错哦。\n[emotion=happy]\n哈哈哈，吾辈也觉得这个笑话很好笑！\n\n注意：回复中绝对不要出现 [completed] 或 [need_search] 标签，这些由后台系统自动处理。'
   const effectivePrompt = systemPrompt
     .replace(/\n*【回复格式】[\s\S]*/g, '')
     .replace(/\n*回复时严格输出 JSON[：:][\s\S]*/g, '')
@@ -182,16 +182,14 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
 
   const chatHistory = [{ role: 'system', content: effectivePrompt }]
 
-  // 注入用户画像
   const profileRow = db.getLatestProfile()
   if (profileRow) {
     chatHistory.push({ role: 'system', content: `[用户画像]: ${profileRow.content}` })
   }
 
   const pending = buildPendingContext(); if (pending) chatHistory.push(pending)
-  chatHistory.push(...db.loadContextForLlm(maxLen))
+  chatHistory.push(...db.loadContextForLlm(sessionId, maxLen))
 
-  // 自动注入相关事实和知识
   if (!isSystem && userContent) {
   const relevantItems = db.searchKnowledgeBase(userContent.slice(0, 200))
   const ks = config.knowledge_settings || {}
@@ -213,7 +211,6 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
   if (extraMessages?.length) for (const m of extraMessages) chatHistory.push(m)
   chatHistory.push({ role: isSystem ? 'system' : 'user', content: finalContent })
 
-  // AI SDK 调用
   const aiModel = await makeAiModel(prov.api_key, prov.base_url, modelName)
 
   let answerText
@@ -226,37 +223,38 @@ async function callChatModel(config, extraMessages, userContent, isSystem) {
   }
 
   const result = parseChatResponse(answerText)
-  if (result.completed_tasks) processCompletedTasks(result.completed_tasks)
-  if (!isSystem) db.saveMessage('user', finalContent)
-  db.saveMessage('assistant', answerText)
+  if (!isSystem) db.saveMessage(sessionId, 'user', finalContent)
+  db.saveMessage(sessionId, 'assistant', answerText)
 
-  const summaryData = db.checkAndSummarize(null, modelName, summaryInterval)
+  const summaryData = db.checkAndSummarize(sessionId, summaryInterval)
   if (summaryData) {
-    try { await summarizeMemory(config, summaryData) } catch (err) { errLog(`后台总结失败: ${err.message}`) }
+    try { await summarizeMemory(config, summaryData, sessionId) } catch (err) { errLog(`后台总结失败: ${err.message}`) }
   }
 
-  return { reply: result.reply, emotion: result.emotion, need_search: result.need_search, search_topic: result.search_topic }
+  return { reply: result.reply, emotion: result.emotion }
 }
 
 // ================================================================
 // 对外接口
 // ================================================================
 async function sendMessage(config, userText) {
+  const session = db.getActiveSession()
+  const sessionId = session?.id || 1
+
   let toolResult = null
-  const toolDecision = await checkToolCall(config, userText, config.character_settings?.system_prompt || '')
+  const toolDecision = await checkToolCall(config, userText, config.character_settings?.system_prompt || '', sessionId)
   if (toolDecision.tool) {
     toolResult = await executeToolCall(config, toolDecision.tool, toolDecision.params)
     if (toolResult) {
-      db.saveMessage('system', `[工具调用: ${toolDecision.tool}] ${toolResult.result}`)
+      db.saveMessage(sessionId, 'system', `[工具调用: ${toolDecision.tool}] ${toolResult.result}`)
       if (toolDecision.tool === 'web_search' && toolDecision.params?.query) {
         db.saveKnowledge(toolDecision.params.query, toolResult.result, 'web', '')
       }
     }
   }
   const extraMessages = toolResult ? [{ role: 'system', content: `[系统: 刚才执行了工具 "${toolDecision.tool}"，结果如下]\n${toolResult.result}` }] : []
-  const result = await callChatModel(config, extraMessages, userText, false)
+  const result = await callChatModel(config, extraMessages, userText, false, sessionId)
 
-  // 后台：事实提取
   const ks = config.knowledge_settings || {}
   const fe = ks.fact_extraction || {}
   if (fe.enabled !== false) {
@@ -267,7 +265,6 @@ async function sendMessage(config, userText) {
     }
   }
 
-  // 后台：画像生成检查
   const pg = ks.profile_generation || {}
   if (pg.enabled !== false) {
     checkAndGenerateProfile(config).catch(err => errLog(`画像检查失败: ${err.message}`))
@@ -277,8 +274,11 @@ async function sendMessage(config, userText) {
 }
 
 async function sendSystemMessage(config, systemContent) {
-  const result = await callChatModel(config, [], systemContent, true)
-  db.saveMessage('system', systemContent)
+  const session = db.getActiveSession()
+  const sessionId = session?.id || 1
+
+  const result = await callChatModel(config, [], systemContent, true, sessionId)
+  db.saveMessage(sessionId, 'system', systemContent)
   return result
 }
 
@@ -294,7 +294,7 @@ async function fetchModels(baseUrl, apiKey) {
 // ================================================================
 // 后台总结记忆
 // ================================================================
-async function summarizeMemory(config, summaryData) {
+async function summarizeMemory(config, summaryData, sessionId) {
   if (!summaryData) return
 
   const api = config.api_settings || {}
@@ -327,21 +327,12 @@ async function summarizeMemory(config, summaryData) {
       stream: false,
       label: '总结模型',
     })).trim()
-    db.saveMessage('system', '[SUMMARY] ' + summaryText)
+    db.updateSessionSummary(sessionId, '[SUMMARY] ' + summaryText)
     console.log('记忆总结已保存:', summaryText.substring(0, 50) + '...')
   } catch (err) {
     console.error('后台总结记忆失败:', err.message)
   }
 }
-
-// ================================================================
-// 知识补全：等待确认状态
-// ================================================================
-let pendingSearch = null
-
-function getPendingSearch() { return pendingSearch }
-function setPendingSearch(topic) { pendingSearch = { topic, timestamp: Date.now() } }
-function clearPendingSearch() { pendingSearch = null }
 
 // ================================================================
 // 知识库模型解析（返回 AI SDK model）
@@ -542,7 +533,7 @@ ${factsText}
       stream: false,
       label: '知识模型-画像生成',
     })).trim()
-    db.saveMessage('system', '[PROFILE] ' + profileText)
+    db.setLatestProfile('[PROFILE] ' + profileText)
     db.setMeta('last_profile_generation', new Date().toISOString())
     db.setMeta('facts_count_at_last_profile', String(facts.length))
     console.log('[Profile] 用户画像已更新')
@@ -566,32 +557,16 @@ function validEmotion(emotion) {
 function parseChatResponse(text) {
   let working = (text || '').trim()
   let emotion = 'idle'
-  let completed_tasks = []
-  let need_search = false
-  let search_topic = null
 
   const emoM = working.match(/^\[emotion=(\w+)\]\s*/i)
   if (emoM) {
     emotion = validEmotion(emoM[1])
-    working = working.slice(emoM[0].length)
+    working = working.slice(emoM[0].length).trim()
   } else {
     errLog(`[emotion] 标签缺失，LLM输出前100字: ${text.slice(0, 100)}`)
   }
 
-  const compM = working.match(/^\[completed=([\d,\s]+)\]\s*/i)
-  if (compM) {
-    completed_tasks = compM[1].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
-    working = working.slice(compM[0].length)
-  }
-
-  const nsM = working.match(/^\[need_search=([^\]]+)\]\s*/i)
-  if (nsM) {
-    need_search = true
-    search_topic = nsM[1].trim()
-    working = working.slice(nsM[0].length)
-  }
-
-  return { reply: working.trim() || '呃...', emotion, completed_tasks, need_search, search_topic }
+  return { reply: working || '呃...', emotion }
 }
 
-module.exports = { sendMessage, sendSystemMessage, fetchModels, getPendingSearch, setPendingSearch, clearPendingSearch }
+module.exports = { sendMessage, sendSystemMessage, fetchModels }

@@ -17,4 +17,10 @@ contextBridge.exposeInMainWorld('api', {
   saveCharacter: (name, data) => ipcRenderer.invoke('character:save', name, data),
   importCharacter: () => ipcRenderer.invoke('character:import'),
   exportCharacter: (format) => ipcRenderer.invoke('character:export', format || 'json'),
+
+  getSessionList: () => ipcRenderer.invoke('session:list'),
+  getActiveSession: () => ipcRenderer.invoke('session:get-active'),
+  createSession: () => ipcRenderer.invoke('session:create'),
+  switchSession: (id) => ipcRenderer.invoke('session:switch', id),
+  deleteSession: (id) => ipcRenderer.invoke('session:delete', id),
 })

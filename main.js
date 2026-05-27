@@ -120,8 +120,8 @@ function createWindow() {
   //   cfg.ui_settings && cfg.ui_settings.window_width
   // 如果 ui_settings 不存在就返回 undefined 而不报错
   const ui = cfg.ui_settings || {}
-  const winW = ui.window_width || 200
-  const winH = ui.window_height || 400
+  const winW = ui.window_width || 280
+  const winH = ui.window_height || 480
 
   // new BrowserWindow({...}) — 创建一个 Electron 窗口
   // 参数对象配置窗口的各种属性
@@ -132,7 +132,7 @@ function createWindow() {
     transparent: true,      // 透明背景（让窗口可以是非矩形的）
     alwaysOnTop: true,      // 窗口始终置顶，不被其他窗口遮挡
     resizable: true,        // 可拉伸缩放（用户拖拽窗口边缘）
-    minWidth: 200,          // 最小宽度
+    minWidth: 240,          // 最小宽度
     minHeight: 400,         // 最小高度
     skipTaskbar: true,      // 不在任务栏显示
     webPreferences: {       // 网页视图（渲染进程）的安全配置
@@ -148,7 +148,7 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'))
 
   // setAspectRatio(宽高比) — 限制窗口只能等比例缩放，拖拽任一边缘自动保持比例
-  // 宽高比 = window_width / window_height，默认 320/650 ≈ 0.492
+  // 宽高比 = window_width / window_height，默认 280/480 ≈ 0.583
   mainWindow.setAspectRatio(winW / winH)
 
   // process.argv — Node.js 的命令行参数数组
@@ -513,27 +513,9 @@ ipcMain.handle('llm:send', async (_event, userText) => {
   lastInteractionTime = Date.now()
   resetIdleProbability()
 
-  const pendingSearch = llm.getPendingSearch()
-  if (pendingSearch) {
-    llm.clearPendingSearch()
-    const cfg = config.load()
-    // 后台静默搜索，不阻塞用户本次对话
-    tools.executeTool('web_search', { query: pendingSearch.topic }, cfg)
-      .then(searchResult => {
-        db.saveKnowledge(pendingSearch.topic, searchResult.result)
-        console.log(`[Knowledge] 已保存搜索结果: ${pendingSearch.topic}`)
-      })
-      .catch(err => console.error('[Knowledge] 后台搜索失败:', err.message))
-  }
-
   const cfg = config.load()
   try {
     const result = await llm.sendMessage(cfg, userText)
-
-    if (result.need_search && result.search_topic) {
-      llm.setPendingSearch(result.search_topic)
-    }
-
     return { reply: result.reply, emotion: result.emotion }
   } catch (err) {
     logError(err)
@@ -734,6 +716,81 @@ ipcMain.handle('character:export', async (_e, format) => {
 })
 
 // ================================================================
+// Session 管理 IPC
+// ================================================================
+
+ipcMain.handle('session:list', async () => {
+  try {
+    const sessions = db.getSessionList()
+    return sessions.map(s => ({
+      id: s.id,
+      characterId: s.character_id,
+      title: s.title,
+      summary: s.summary,
+      isActive: !!s.is_active,
+      createdAt: s.created_at,
+      lastActiveAt: s.last_active_at,
+      messageCount: db.getSessionMessageCount(s.id)
+    }))
+  } catch (err) {
+    console.error('[Session] 列表获取失败:', err.message)
+    return []
+  }
+})
+
+ipcMain.handle('session:create', async () => {
+  try {
+    const cfg = config.load()
+    const charName = cfg.active_character || '七夜'
+    const sessionId = db.createSession(charName, '新对话')
+    console.log('[Session] 新建会话:', sessionId)
+    return { success: true, sessionId }
+  } catch (err) {
+    console.error('[Session] 创建失败:', err.message)
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('session:switch', async (_e, sessionId) => {
+  try {
+    db.switchSession(sessionId)
+    console.log('[Session] 切换会话:', sessionId)
+    return { success: true }
+  } catch (err) {
+    console.error('[Session] 切换失败:', err.message)
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('session:delete', async (_e, sessionId) => {
+  try {
+    db.deleteSession(sessionId)
+    console.log('[Session] 删除会话:', sessionId)
+    return { success: true }
+  } catch (err) {
+    console.error('[Session] 删除失败:', err.message)
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('session:get-active', async () => {
+  try {
+    const s = db.getActiveSession()
+    if (!s) return null
+    return {
+      id: s.id,
+      characterId: s.character_id,
+      title: s.title,
+      summary: s.summary,
+      messageCount: db.getSessionMessageCount(s.id)
+    }
+  } catch (err) {
+    console.error('[Session] 获取活跃会话失败:', err.message)
+    return null
+  }
+})
+
+// ================================================================
 // 应用启动
 // ================================================================
 
@@ -780,6 +837,17 @@ if (!gotLock) {
         console.error('[Config] 迁移 API Key 失败:', err.message)
       }
     }
+
+    db.getDb().then(() => {
+      const session = db.getActiveSession()
+      if (!session) {
+        const cfg = config.load()
+        const charName = cfg.active_character || '七夜'
+        db.createSession(charName, '默认对话')
+        console.log('[Session] 创建默认会话')
+      }
+    })
+
     createWindow()
   })
 

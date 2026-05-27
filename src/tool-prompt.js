@@ -101,17 +101,28 @@ function buildToolPrompt(characterName, currentToolsContext) {
 输出示例:
 {"tool": "web_search", "params": {"query": "今天北京天气"}}
 
-## 5. search_knowledge — 搜索已存储的事实和知识库
-适用场景: 用户问"你记得我..."、"我之前说过..."、"你知道..."、"查下我们之前聊过的..."等需要回忆过往事实或已存储知识的情况
+## 5. search_knowledge — 搜索知识库
+适用场景: 用户问"你记得我..."、"我之前说过..."、"你知道..."、"查下我们之前聊过的..."等需要回忆知识库内容的情况
 参数:
   - query: 搜索关键词（必填）
+  - classification: 可选，限定分类："user_profile"(用户画像)、"taught"(用户教学)、"web"(外部知识)
 
 ⚠️ 重要规则：
-  此工具搜索的是本地数据库中的用户事实和外部知识，不是互联网。用于回忆之前对话中提取的事实或已存储的知识。
+  此工具搜索本地统一知识库（含用户画像、用户教学、外部知识），不是互联网。
   如果用户问的是需要实时联网的信息（天气、新闻、最新资讯），请使用 web_search 而非此工具。
 
 输出示例:
 {"tool": "search_knowledge", "params": {"query": "用户喜欢吃什么"}}
+
+## 6. remember — 记住用户教学的知识
+适用场景: 用户明确说"记住xxx"、"记下xxx"、"帮我记一下xxx"、"别忘了xxx"等，需要将在对话中教给宠物的知识存入知识库
+参数:
+  - content: 要记住的知识内容（必填）
+  - category: 可选分类标签，如"编程"、"游戏"、"日常"
+  - tags: 可选标签数组
+
+输出示例:
+{"tool": "remember", "params": {"content": "主人最喜欢的三文鱼口味猫粮品牌是Royal Canin", "category": "饮食", "tags": ["猫粮","偏好"]}}
 
 【当前已有记录】${
     // 三元表达式: 条件 ? 真值 : 假值
@@ -139,10 +150,16 @@ function buildToolPrompt(characterName, currentToolsContext) {
 只需要输出一行纯 JSON，不要有任何其他文字、不要用 Markdown 代码块、不要解释。
 
 不需要工具:
-{"tool": null, "reason": "简短说明为什么不需要"}
+{"tool": null, "completed_tasks": [], "reason": "简短说明为什么不需要"}
 
 需要工具:
-{"tool": "工具名称", "params": { ... }}
+{"tool": "工具名称", "params": { ... }, "completed_tasks": []}
+
+【任务完成判断】
+如果用户说"做完了/搞定了/好了/完成了/已经做了"等，且【当前已有记录】中有对应的待办或提醒，
+在 completed_tasks 数组中填入对应记录的数字 ID。示例:
+{"tool": null, "completed_tasks": [3, 5], "reason": "用户完成了待办"}
+{"tool": "web_search", "params": {"query": "..."}, "completed_tasks": []}
 
 记住：你只负责判断是否需要工具并给出参数。不要回复聊天内容，不要扮演 ${characterName}。`
 }
