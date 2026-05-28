@@ -2,7 +2,7 @@
  * ===== remember.js — 知识库记忆工具 =====
  *
  * 将用户主动教学的知识存入统一 knowledge_base 表。
- * classification = 'taught'
+ * classification = 'user_profile'
  *
  * @param {object} params — { content: 知识内容, category?: 分类标签, tags?: 标签数组 }
  * @returns {{ success: boolean, result: string }}
@@ -17,11 +17,11 @@ function execute(params) {
   }
 
   const id = db.saveKnowledgeItem({
-    classification: 'taught',
-    category: category || '通用',
+    classification: 'user_profile',
+    category: category || '用户教学',
     content: content.trim(),
     tags: tags || [],
-    confidence: 0.9
+    confidence: 0.95
   })
 
   return {

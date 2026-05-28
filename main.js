@@ -719,6 +719,18 @@ ipcMain.handle('character:export', async (_e, format) => {
 // Session 管理 IPC
 // ================================================================
 
+function notifyMainWindowSessionChanged(sessionId, action) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const s = db.getSessionById(sessionId)
+    mainWindow.webContents.send('session:changed', {
+      action,
+      sessionId,
+      characterId: s?.character_id || '',
+      title: s?.title || ''
+    })
+  }
+}
+
 ipcMain.handle('session:list', async () => {
   try {
     const sessions = db.getSessionList()
@@ -743,6 +755,7 @@ ipcMain.handle('session:create', async () => {
     const cfg = config.load()
     const charName = cfg.active_character || '七夜'
     const sessionId = db.createSession(charName, '新对话')
+    notifyMainWindowSessionChanged(sessionId, 'created')
     console.log('[Session] 新建会话:', sessionId)
     return { success: true, sessionId }
   } catch (err) {
@@ -751,9 +764,22 @@ ipcMain.handle('session:create', async () => {
   }
 })
 
+ipcMain.handle('session:create-for-character', async (_e, charName) => {
+  try {
+    const sessionId = db.createSession(charName, `${charName} 对话`)
+    notifyMainWindowSessionChanged(sessionId, 'created')
+    console.log('[Session] 为角色创建会话:', charName, sessionId)
+    return { success: true, sessionId }
+  } catch (err) {
+    console.error('[Session] 为角色创建会话失败:', err.message)
+    return { success: false, error: err.message }
+  }
+})
+
 ipcMain.handle('session:switch', async (_e, sessionId) => {
   try {
     db.switchSession(sessionId)
+    notifyMainWindowSessionChanged(sessionId, 'switched')
     console.log('[Session] 切换会话:', sessionId)
     return { success: true }
   } catch (err) {
@@ -765,6 +791,7 @@ ipcMain.handle('session:switch', async (_e, sessionId) => {
 ipcMain.handle('session:delete', async (_e, sessionId) => {
   try {
     db.deleteSession(sessionId)
+    db.invalidateMessageCache(sessionId)
     console.log('[Session] 删除会话:', sessionId)
     return { success: true }
   } catch (err) {
@@ -787,6 +814,175 @@ ipcMain.handle('session:get-active', async () => {
   } catch (err) {
     console.error('[Session] 获取活跃会话失败:', err.message)
     return null
+  }
+})
+
+ipcMain.handle('session:get-messages', async (_e, sessionId) => {
+  try {
+    const sid = sessionId || (db.getActiveSession()?.id)
+    if (!sid) return []
+    return db.loadContextForLlm(sid, 200)
+  } catch (err) {
+    console.error('[Session] 获取消息失败:', err.message)
+    return []
+  }
+})
+
+// ================================================================
+// 知识库管理 IPC
+// ================================================================
+
+ipcMain.handle('knowledge:list', async (_e, options) => {
+  try {
+    return db.queryKnowledgeBase(options || {})
+  } catch (err) {
+    console.error('[Knowledge] 查询失败:', err.message)
+    return { items: [], total: 0, page: 1, pageSize: 20 }
+  }
+})
+
+ipcMain.handle('knowledge:update', async (_e, id, fields) => {
+  try {
+    const ok = db.updateKnowledgeItem(id, fields)
+    return { success: ok }
+  } catch (err) {
+    console.error('[Knowledge] 更新失败:', err.message)
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('knowledge:delete', async (_e, ids) => {
+  try {
+    const count = db.deleteKnowledgeItems(ids)
+    return { success: true, deleted: count }
+  } catch (err) {
+    console.error('[Knowledge] 删除失败:', err.message)
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('knowledge:stats', async () => {
+  try {
+    return db.getKnowledgeStats()
+  } catch (err) {
+    console.error('[Knowledge] 统计失败:', err.message)
+    return { user_profile: 0, taught: 0, web: 0, total: 0 }
+  }
+})
+
+ipcMain.handle('knowledge:create', async (_e, item) => {
+  try {
+    const id = db.saveKnowledgeItem(item)
+    return { success: true, id }
+  } catch (err) {
+    console.error('[Knowledge] 创建失败:', err.message)
+    return { success: false, error: err.message }
+  }
+})
+
+// ================================================================
+// 导出 IPC
+// ================================================================
+
+ipcMain.handle('session:export', async (_e, sessionId, options) => {
+  try {
+    const { format, includeLore, includeProfile, includeWeb, includeChar } = options || {}
+    const cfg = config.load()
+    const charName = options?.charName || cfg.active_character || '七夜'
+
+    let charData = null
+    if (includeChar !== false) {
+      const charFile = path.join(getCharacterDir(), charName, 'character.json')
+      if (fs.existsSync(charFile)) {
+        try { charData = JSON.parse(fs.readFileSync(charFile, 'utf-8')) } catch {}
+      }
+      if (!charData) {
+        charData = { name: charName, displayName: charName, system_prompt: cfg.character_settings?.system_prompt || '' }
+      }
+    }
+
+    let sessionData = null
+    if (sessionId) {
+      const s = db.getSessionById(sessionId)
+      if (!s) return { success: false, reason: '会话不存在' }
+      const msgs = db.loadContextForLlm(sessionId, 9999).filter(m => m.role === 'user' || m.role === 'assistant')
+      sessionData = {
+        id: s.id, title: s.title, character_id: s.character_id,
+        summary: s.summary, created_at: s.created_at, last_active_at: s.last_active_at,
+        message_count: msgs.length, messages: msgs
+      }
+    }
+
+    const knowledge = {}
+    if (includeLore) knowledge.lore = db.getAllKnowledgeByClassification('lore')
+    if (includeProfile) knowledge.user_profile = db.getAllKnowledgeByClassification('user_profile')
+    if (includeWeb) knowledge.web = db.getAllKnowledgeByClassification('web')
+
+    const exportData = {
+      format: 'netpet-session-v1',
+      exported_at: new Date().toISOString(),
+      character: charData,
+      session: sessionData,
+      knowledge: Object.keys(knowledge).length > 0 ? knowledge : undefined
+    }
+
+    const suffix = sessionId ? `_会话_${sessionId}` : '_角色卡'
+    if (format === 'png') {
+      const idlePath = path.join(getCharacterDir(), charName, 'idle.png')
+      let pngBuf
+      if (fs.existsSync(idlePath)) {
+        pngBuf = fs.readFileSync(idlePath)
+      } else {
+        pngBuf = fs.readFileSync(path.join(getCharacterDir(), '七夜', 'idle.png'))
+      }
+      const exportBuf = pngCard.embedCardJson(pngBuf, exportData)
+
+      const result = await dialog.showSaveDialog({
+        title: '导出 PNG 角色卡',
+        defaultPath: `${charName}${suffix}.png`,
+        filters: [{ name: 'PNG 角色卡', extensions: ['png'] }]
+      })
+      if (result.canceled) return { success: false, reason: 'cancelled' }
+
+      fs.writeFileSync(result.filePath, exportBuf)
+      return { success: true, path: result.filePath }
+    }
+
+    const result = await dialog.showSaveDialog({
+      title: '导出会话 (JSON)',
+      defaultPath: `${charName}${suffix}.json`,
+      filters: [{ name: 'JSON 文件', extensions: ['json'] }]
+    })
+    if (result.canceled) return { success: false, reason: 'cancelled' }
+
+    fs.writeFileSync(result.filePath, JSON.stringify(exportData, null, 2), 'utf-8')
+    return { success: true, path: result.filePath }
+  } catch (err) {
+    console.error('[Export] 导出失败:', err.message)
+    return { success: false, reason: err.message }
+  }
+})
+
+ipcMain.handle('knowledge:export', async (_e, options) => {
+  try {
+    const { includeLore, includeProfile, includeWeb } = options || {}
+    const data = { exported_at: new Date().toISOString(), format: 'netpet-knowledge-v1' }
+    if (includeLore) data.lore = db.getAllKnowledgeByClassification('lore')
+    if (includeProfile) data.user_profile = db.getAllKnowledgeByClassification('user_profile')
+    if (includeWeb) data.web = db.getAllKnowledgeByClassification('web')
+
+    const result = await dialog.showSaveDialog({
+      title: '导出知识库',
+      defaultPath: `NetPet_知识库_${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: 'JSON 文件', extensions: ['json'] }]
+    })
+    if (result.canceled) return { success: false, reason: 'cancelled' }
+
+    fs.writeFileSync(result.filePath, JSON.stringify(data, null, 2), 'utf-8')
+    return { success: true, path: result.filePath }
+  } catch (err) {
+    console.error('[Export] 知识库导出失败:', err.message)
+    return { success: false, reason: err.message }
   }
 })
 

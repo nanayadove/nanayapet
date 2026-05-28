@@ -105,17 +105,17 @@ function buildToolPrompt(characterName, currentToolsContext) {
 适用场景: 用户问"你记得我..."、"我之前说过..."、"你知道..."、"查下我们之前聊过的..."等需要回忆知识库内容的情况
 参数:
   - query: 搜索关键词（必填）
-  - classification: 可选，限定分类："user_profile"(用户画像)、"taught"(用户教学)、"web"(外部知识)
+  - classification: 可选，限定分类："user_profile"(用户画像)、"web"(外部知识)、"lore"(世界观设定)
 
 ⚠️ 重要规则：
-  此工具搜索本地统一知识库（含用户画像、用户教学、外部知识），不是互联网。
+  此工具搜索本地统一知识库（含用户画像、外部知识、世界观设定），不是互联网。
   如果用户问的是需要实时联网的信息（天气、新闻、最新资讯），请使用 web_search 而非此工具。
 
 输出示例:
 {"tool": "search_knowledge", "params": {"query": "用户喜欢吃什么"}}
 
 ## 6. remember — 记住用户教学的知识
-适用场景: 用户明确说"记住xxx"、"记下xxx"、"帮我记一下xxx"、"别忘了xxx"等，需要将在对话中教给宠物的知识存入知识库
+适用场景: 用户明确说"记住xxx"、"记下xxx"、"帮我记一下xxx"、"别忘了xxx"等
 参数:
   - content: 要记住的知识内容（必填）
   - category: 可选分类标签，如"编程"、"游戏"、"日常"

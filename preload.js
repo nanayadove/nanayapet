@@ -87,5 +87,11 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('proactive:greeting', (_event, data) => callback(data))
   },
 
+  onSessionChanged: (callback) => {
+    ipcRenderer.on('session:changed', (_event, data) => callback(data))
+  },
+
+  getSessionMessages: (sessionId) => ipcRenderer.invoke('session:get-messages', sessionId),
+
   getCharacterAssetUrl: (characterName, emotion) => `netpet://${encodeURIComponent(characterName)}/${encodeURIComponent(emotion)}.png`,
 })

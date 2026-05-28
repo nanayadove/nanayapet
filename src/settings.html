@@ -146,6 +146,7 @@
     <button class="tab" data-page="page-character"><span class="tab-icon">🎭</span> 角色设定</button>
     <button class="tab" data-page="page-chat"><span class="tab-icon">💬</span> 主动搭话</button>
     <button class="tab" data-page="page-sessions"><span class="tab-icon">📋</span> 对话管理</button>
+    <button class="tab" data-page="page-knowledge-mgr"><span class="tab-icon">🗄️</span> 知识库管理</button>
   </nav>
 
   <!-- 右侧内容 -->
@@ -204,9 +205,14 @@
         <div class="tip">每 N 轮对话（1轮 = 你说一句 + AI回一句）自动总结一次</div>
       </div>
       <div class="group">
-        <label>最大历史长度（条）</label>
-        <input id="inp-max-history" type="number" min="5" max="500" placeholder="10">
-        <div class="tip">每次请求带上最近多少条对话</div>
+        <label>最近对话轮数（轮）</label>
+        <input id="inp-max-history" type="number" min="2" max="200" placeholder="8">
+        <div class="tip">每次请求加载最近多少条未总结的对话消息（1轮=用户1条+AI1条）</div>
+      </div>
+      <div class="group">
+        <label>上下文总长度限制（字，0=不限制）</label>
+        <input id="inp-max-context" type="number" min="0" max="50000" step="500" placeholder="0">
+        <div class="tip">防止 prompt 过长。超出时自动从最早的对话开始裁剪，保留角色设定和记忆</div>
       </div>
     </div>
 
@@ -360,14 +366,7 @@
       </div>
 
       <div style="display:flex; gap:6px; margin-bottom:12px;">
-        <button id="btn-import-char" style="flex:1; padding:7px; border:1px solid #4CAF50; background:white; color:#4CAF50; border-radius:5px; cursor:pointer; font-size:13px;">📥 一键导入</button>
-        <div style="flex:1; display:flex; gap:0;">
-          <button id="btn-export-char" style="flex:1; padding:7px; border:1px solid #2196F3; background:white; color:#2196F3; border-radius:5px 0 0 5px; cursor:pointer; font-size:13px;">📤 导出</button>
-          <select id="sel-export-format" style="width:auto; padding:7px 4px; border:1px solid #2196F3; border-left:none; border-radius:0 5px 5px 0; background:white; color:#2196F3; cursor:pointer; font-size:12px;">
-            <option value="json">JSON</option>
-            <option value="png">PNG卡</option>
-          </select>
-        </div>
+        <button id="btn-import-char" style="flex:1; padding:7px; border:1px solid #4CAF50; background:white; color:#4CAF50; border-radius:5px; cursor:pointer; font-size:13px;">📥 一键导入 (JSON/PNG)</button>
       </div>
 
       <hr style="margin:12px 0; border:none; border-top:1px solid #ddd;">
@@ -385,6 +384,37 @@
         <textarea id="inp-prompt" rows="10"></textarea>
         <div class="tip">角色的性格、语气、行为规则都在这里定义</div>
       </div>
+
+      <hr style="margin:16px 0; border:none; border-top:1px solid #ddd;">
+
+      <h4 style="font-size:14px;color:#333;margin-bottom:8px;">📦 导出角色 + 对话 + 知识库</h4>
+      <div class="tip" style="margin-bottom:10px;">打包角色卡（含提示词）+ 选定会话 + 可选知识库分类，支持 PNG 角色卡和 JSON 两种格式</div>
+
+      <div class="group">
+        <label>选择会话</label>
+        <select id="export-session-select" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:5px;font-size:13px;">
+          <option value="">-- 仅导出角色卡 --</option>
+        </select>
+      </div>
+
+      <div style="margin-bottom:8px;">
+        <label style="font-size:13px;font-weight:bold;display:block;margin-bottom:4px;">格式</label>
+        <div style="display:flex;gap:12px;">
+          <label style="font-size:13px;cursor:pointer;"><input type="radio" name="char-export-format" value="json" checked> JSON</label>
+          <label style="font-size:13px;cursor:pointer;"><input type="radio" name="char-export-format" value="png"> PNG 角色卡</label>
+        </div>
+      </div>
+
+      <div style="margin-bottom:8px;">
+        <label style="font-size:13px;font-weight:bold;display:block;margin-bottom:4px;">附带知识库</label>
+        <div style="display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;">
+          <label><input type="checkbox" class="char-export-opt" data-key="includeLore"> 世界观 Lore</label>
+          <label><input type="checkbox" class="char-export-opt" data-key="includeProfile"> 用户画像</label>
+          <label><input type="checkbox" class="char-export-opt" data-key="includeWeb"> 外部知识</label>
+        </div>
+      </div>
+
+      <button id="btn-char-export-bundle" style="width:100%;padding:8px;background:#FF9800;color:white;border:none;border-radius:5px;cursor:pointer;font-size:13px;margin-top:4px;">⬇ 导出角色卡 + 对话 + 知识库</button>
     </div>
 
     <!-- ===== 主动搭话 ===== -->
@@ -455,6 +485,76 @@
         <div style="padding:20px; text-align:center; color:#999; font-size:13px;">加载中...</div>
       </div>
     </div>
+
+    <!-- ===== 知识库管理 ===== -->
+    <div id="page-knowledge-mgr" class="page">
+      <h3>知识库管理</h3>
+      <div class="tip" style="margin-bottom:8px;">浏览、搜索、编辑和删除知识库中的条目。修改会即时生效。</div>
+
+      <div id="kb-stats" style="display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+        <span style="padding:3px 10px;background:#e3f2fd;border-radius:4px;font-size:12px;">画像: <b id="kb-stat-profile">0</b></span>
+        <span style="padding:3px 10px;background:#e8f5e9;border-radius:4px;font-size:12px;">网页: <b id="kb-stat-web">0</b></span>
+        <span style="padding:3px 10px;background:#fff3e0;border-radius:4px;font-size:12px;">Lore: <b id="kb-stat-lore">0</b></span>
+        <span style="padding:3px 10px;background:#f5f5f5;border-radius:4px;font-size:12px;">合计: <b id="kb-stat-total">0</b></span>
+      </div>
+
+      <div style="margin-bottom:10px;">
+        <button id="kb-toggle-add" style="padding:4px 12px;border:1px solid #FF9800;background:white;color:#FF9800;border-radius:4px;cursor:pointer;font-size:12px;">＋ 快速添加 Lore</button>
+      </div>
+
+      <div id="kb-add-form" style="display:none;margin-bottom:10px;padding:10px;background:#fff8e1;border:1px solid #ffe0b2;border-radius:5px;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <select id="kb-add-class" style="width:80px;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;">
+            <option value="user_profile">画像</option>
+            <option value="web">网页</option>
+            <option value="lore" selected>Lore</option>
+          </select>
+          <input id="kb-add-category" type="text" placeholder="类别 (如: 种族、地理)" style="width:100px;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;">
+          <input id="kb-add-content" type="text" placeholder="内容 (如: 精灵族是长生种，寿命3000年)" style="flex:1;min-width:200px;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;">
+          <input id="kb-add-tags" type="text" placeholder="触发关键词 (逗号分隔)" style="width:180px;padding:5px;border:1px solid #ccc;border-radius:4px;font-size:12px;">
+          <button id="kb-btn-add" style="padding:5px 14px;background:#FF9800;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">添加</button>
+        </div>
+        <div class="tip" style="margin-top:4px;">Lore 默认分类。触发关键词用于对话中检测 → 匹配时自动注入 LLM 上下文</div>
+      </div>
+
+      <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;">
+        <select id="kb-filter-class" style="width:110px;padding:5px 6px;border:1px solid #ccc;border-radius:4px;font-size:12px;">
+          <option value="">全部分类</option>
+          <option value="user_profile">用户画像</option>
+          <option value="web">外部知识</option>
+          <option value="lore">Lore</option>
+        </select>
+        <input id="kb-filter-search" type="text" placeholder="搜索内容/分类/标签..." style="flex:1;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px;">
+        <button id="kb-btn-search" style="padding:5px 12px;background:#4CAF50;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">搜索</button>
+        <button id="kb-btn-delete-selected" style="padding:5px 10px;background:white;color:#f44336;border:1px solid #f44336;border-radius:4px;cursor:pointer;font-size:12px;display:none;">删除选中</button>
+      </div>
+
+      <div id="kb-table-wrap" style="max-height:340px;overflow-y:auto;border:1px solid #ddd;border-radius:5px;margin-bottom:8px;">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;">
+          <thead>
+            <tr style="background:#f0f0f5;position:sticky;top:0;">
+              <th style="width:28px;padding:6px 4px;"><input type="checkbox" id="kb-select-all" title="全选"></th>
+              <th style="width:56px;padding:6px 4px;">分类</th>
+              <th style="width:56px;padding:6px 4px;">类别</th>
+              <th style="padding:6px 4px;">内容</th>
+              <th style="width:44px;padding:6px 4px;">置信度</th>
+              <th style="width:70px;padding:6px 4px;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="kb-table-body">
+            <tr><td colspan="6" style="padding:20px;text-align:center;color:#999;">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="kb-pagination" style="display:flex;align-items:center;justify-content:space-between;font-size:12px;">
+        <span id="kb-page-info">第 1 页 / 共 0 页 (0 条)</span>
+        <div style="display:flex;gap:4px;">
+          <button id="kb-btn-prev" style="padding:4px 10px;border:1px solid #ccc;background:white;border-radius:3px;cursor:pointer;font-size:12px;" disabled>上一页</button>
+          <button id="kb-btn-next" style="padding:4px 10px;border:1px solid #ccc;background:white;border-radius:3px;cursor:pointer;font-size:12px;" disabled>下一页</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <footer>
@@ -462,6 +562,22 @@
     <button id="btn-cancel">取消</button>
     <button id="btn-save">保存</button>
   </footer>
+
+  <div id="export-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);z-index:100;align-items:center;justify-content:center;">
+    <div style="background:white;padding:20px;border-radius:8px;width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+      <h3 style="margin:0 0 10px;font-size:15px;">导出会话</h3>
+      <div id="export-title" style="font-size:12px;color:#666;margin-bottom:10px;"></div>
+      <div style="margin-bottom:10px;">
+        <label style="font-size:13px;font-weight:bold;display:block;margin-bottom:4px;">格式</label>
+        <label style="font-size:13px;cursor:pointer;margin-right:12px;"><input type="radio" name="export-format" value="json" checked> JSON</label>
+        <label style="font-size:13px;cursor:pointer;"><input type="radio" name="export-format" value="png"> PNG 角色卡</label>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="export-modal-cancel" style="padding:6px 16px;border:1px solid #ccc;background:white;border-radius:4px;cursor:pointer;font-size:13px;">取消</button>
+        <button id="export-modal-confirm" style="padding:6px 16px;border:none;background:#4CAF50;color:white;border-radius:4px;cursor:pointer;font-size:13px;">导出</button>
+      </div>
+    </div>
+  </div>
 
   <script src="settings.js"></script>
 </body>

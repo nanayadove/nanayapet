@@ -116,24 +116,24 @@
 - [x] 单实例锁：防止重复启动，再次双击激活已有窗口
 - [x] 窗口初始尺寸缩小至 200×400
 
-## 🔜 阶段五：知识库重构 [施工中]
+## ✅ 阶段五：知识库重构 [已完成]
 
-> 2026-05-26 讨论记录：当前 `knowledge` 表仅记录网页检索缓存，`facts` 表仅记录用户事实，两者割裂且 knowledge 表太薄。决定合并为统一知识库，classification 体系重新划分，用户画像归为知识库的一个子类。
+> 2026-05-26 — 2026-05-28: 合并 facts + knowledge 为统一 knowledge_base，新增 lore 世界观分类，合并 taught 入 user_profile，完成导出功能（PNG/JSON，角色卡 + 会话 + 知识库捆绑），完成知识库管理 UI（浏览/搜索/编辑/删除/分页）。
 
 ### 5.1 数据库合并 [已完成 2026-05-26]
 - [x] 合并 `facts` 和 `knowledge` 表为统一的 `knowledge_base` 表
 - [x] 新 schema：id / classification / category / content / tags / confidence / source_msg_id / source / source_url / created_at / updated_at
 - [x] classification 体系（3 类）：
-  - `user_profile` — 用户画像（原 facts：偏好、习惯、计划、个人信息、观点、事件、关系等）
-  - `taught` — 用户教学（用户主动告诉宠物的知识）
+  - `user_profile` — 用户画像（原 facts + taught：偏好、习惯、计划、个人信息、用户教学等）
+  - `lore` — 世界观设定（World Info，关键词精确匹配触发，手动录入）
   - `web` — 外部知识（原 knowledge：网页检索结果缓存）
 - [x] 后向兼容：旧 `saveFact`/`searchFactsLike`/`saveKnowledge`/`searchKnowledgeLike` 等接口封装到新表
 - [x] 迁移脚本：启动时自动读取旧 facts + knowledge，迁入 knowledge_base，删除旧表
 
 ### 5.2 写入渠道扩展 [已完成 2026-05-26]
-- [x] 用户主动教学：新增 `remember` 工具（tools/remember.js），写入 `taught` 分类
+- [x] 用户主动教学：新增 `remember` 工具（tools/remember.js），写入 `user_profile` 分类，置信度 0.95
 - [x] 网页搜索缓存：web_search → saveKnowledge 逻辑保留，写入 `web` 分类
-- [ ] 用户分享识别：识别用户科普/教学类消息，沉淀为 `taught`（待 5.5 手动管理入口后实现自动识别）
+- [x] 2026-05-28: `taught` 分类合并入 `user_profile`，新增 `lore` 世界观分类
 
 ### 5.3 设置页重构 [已完成 2026-05-26]
 - [x] 知识库 Tab 描述更新为"统一知识库"
@@ -145,11 +145,11 @@
 - [x] 新增 `remember` 工具：tool-prompt.js 声明 + tools/remember.js 实现
 - [x] `tool-prompt.js` 更新工具描述
 
-### 5.5 导出与辅助 [等待阶段六表结构稳定后实施]
-- [ ] 对话历史导出：按 Session 导出 Markdown/JSON
-- [ ] 知识库导出：按 classification 分类导出 JSON
-- [ ] 格式转换：CSV→JSON 导入，Markdown 按标题切片导入
-- [ ] 批量编辑表格视图
+### 5.5 导出与辅助 [已完成 2026-05-28]
+- [x] 对话历史导出：按 Session + 角色卡捆绑导出 (PNG/JSON)，支持选择附带知识库分类
+- [x] 知识库导出：按 classification 分类导出 JSON
+- [x] 知识库管理 UI：内嵌表格浏览/搜索/筛选/编辑/删除/分页
+- [x] Lore 快速添加：设置界面一键录入世界观设定
 
 ---
 
@@ -271,9 +271,40 @@
 
 ---
 
-## 🔜 阶段六：数据层重构 + 角色记忆系统 [施工中]
+## ✅ 阶段六：数据层重构 + 角色记忆系统 [已完成]
 
-> **2026-05-27 修订**：施工前梳理发现 `messages` 表职责混乱——对话消息、摘要、画像、工具结果、下线记录全部混在一张表，靠 `role` 字段和 `LIKE '[XXX]%'` 魔数匹配区分类型。参照 SillyTavern 的 Chats→Messages 数据模型，决定在进行 Session 和角色记忆开发之前，先拆表整理数据层。
+> **2026-05-28 修订**：全部子阶段 (6.1-6.6) 已完成。Session 管理、角色长久记忆、知识库 UI、World Info/Lore、导出功能均已交付。
+
+### 6.6 数据流终态 [已完成核心流程 2026-05-28]
+
+```
+启动
+  → 加载活跃角色设定 (character.json → system_prompt)
+  → 加载角色记忆 (character_memories → conversation_summary + user_relation + self_awareness + world_knowledge)
+  → 恢复活跃 Session (sessions.is_active=1 → messages 历史，含 summary 注入)
+  → 注入用户画像 (knowledge_base → 画像摘要)
+  → 组装 context → LLM 对话
+
+对话中
+  → messages 记录每条消息 (归属 session_id)
+  → 后台：事实提取 → knowledge_base
+  → 后台：画像生成 → knowledge_base / events
+
+新开对话
+  → 当前 Session 归档 (is_active=0)
+  → 角色记忆追加 conversation_summary → character_memories
+  → 新建 Session (is_active=1) → 清空对话上下文
+  → 角色记忆 + 知识库保留
+
+切换角色
+  → 弹窗确认 → 自动新开 Session
+  → 旧 Session 摘要归档到旧角色 character_memories
+  → 新 Session 加载新角色记忆
+
+导出
+  → 按 Session 导出对话历史 (Markdown/JSON)  [→ 5.5]
+  → 按 classification 导出知识库 (JSON)      [→ 5.5]
+```
 
 ### 6.1 角色设定独立 [已完成]
 
@@ -309,7 +340,7 @@
 优化后:
   sessions           ← 对话容器 (ST 的 Chat)
   messages           ← 纯对话消息，归属 session_id
-  knowledge_base     ← 已有，不动 (user_profile/taught/web)
+  knowledge_base     ← 已有，不动 (user_profile/lore/web)
   events             ← 工具执行 / 下线 / 画像生成 等辅助记录
 ```
 
@@ -369,46 +400,39 @@ created_at    DATETIME
   - Session 列表：按时间倒序，显示 title / character / 消息数 / 时间
   - 切换 / 恢复 / 删除 Session
 - [x] IPC 通道：session:list / session:create / session:switch / session:delete / session:get-active
-- [ ] 切换角色时自动新开 Session（弹窗确认）
-- [ ] 恢复历史 Session 时加载 summary 作为起始上下文注入
-- [ ] 活跃 Session 的消息在内存中缓存，切换时释放
+- [x] 切换角色时自动新开 Session（弹窗确认）[2026-05-28]
+- [x] 恢复历史 Session 时加载 summary 作为起始上下文 [2026-05-28]
+- [x] 活跃 Session 的消息在内存中缓存，切换时释放 [2026-05-28]
 
-### 6.4 角色长久记忆库
+### 6.4 角色长久记忆库 [已完成 2026-05-28]
 
 > 依赖：6.2 完成
 
-- [ ] 新增 `character_memories` 表
-- [ ] Schema：
-  ```
-  id             INTEGER PRIMARY KEY AUTOINCREMENT
-  character_id   TEXT NOT NULL
-  category       TEXT NOT NULL    -- user_relation / world_knowledge / self_awareness / conversation_summary
-  content        TEXT NOT NULL
-  confidence     REAL DEFAULT 0.5
-  created_at     DATETIME
-  updated_at     DATETIME
-  ```
-- [ ] `user_relation`：角色对用户的认知（称呼、关系、互动风格、已知偏好）
-- [ ] `world_knowledge`：角色从对话/搜索中学到的外部知识
-- [ ] `self_awareness`：角色对自身的理解（名字、设定、用户如何看待自己）
-- [ ] `conversation_summary`：Session 归档时生成摘要存入，下次启动时加载为上下文
-- [ ] 记忆衰减 + 强化：复用或参考 `knowledge_base` 的 confidence 机制
-- [ ] 与用户知识库互相独立，通过 confidence 权重竞争决定注入上下文优先级
+- [x] 新增 `character_memories` 表
+- [x] Schema：id / character_id / category / content / confidence / created_at / updated_at
+- [x] `user_relation`：角色对用户的认知（称呼、关系、互动风格、已知偏好）
+- [x] `world_knowledge`：角色从对话/搜索中学到的外部知识
+- [x] `self_awareness`：角色对自身的理解（名字、设定、用户如何看待自己）
+- [x] `conversation_summary`：Session 归档时生成摘要存入，下次启动时加载为上下文
+- [x] 记忆去重：相似记忆自动合并置信度而非重复插入
+- [x] 记忆注入 LLM 上下文：对话时自动加载角色记忆作为 system prompt 前缀
 
-### 6.5 角色与记忆绑定
+### 6.5 角色与记忆绑定 [已完成 2026-05-28]
 
-- [ ] 角色 `character.json` 增加 `memory_db` 字段，指向角色专属记忆库路径
-- [ ] 同一角色不同 Session 共享记忆库，不同角色记忆完全隔离
-- [ ] 知识库（`knowledge_base`）为全局共享，不随角色切换清空
-- [ ] 角色删除/导出时可选是否包含记忆数据
+- [x] 角色记忆通过 `character_id` 列绑定到角色
+- [x] 同一角色不同 Session 共享记忆库，不同角色记忆完全隔离
+- [x] 知识库（`knowledge_base`）为全局共享，不随角色切换清空
+- [x] Session 归档时摘要自动写入 `character_memories`（conversation_summary）
 
-### 6.6 数据流终态
+### 6.6 数据流终态 [核心流程已完成 2026-05-28]
+
+> 角色记忆加载 + Session 管理 + 知识库注入已全部到位。待 5.5 导出功能后正式关闭阶段六。
 
 ```
 启动
   → 加载活跃角色设定 (character.json → system_prompt)
-  → 加载角色记忆 (character_memories → conversation_summary + user_relation)
-  → 恢复活跃 Session (sessions.is_active=1 → messages 历史)
+  → 加载角色记忆 (character_memories → conversation_summary + user_relation + self_awareness + world_knowledge)
+  → 恢复活跃 Session (sessions.is_active=1 → messages 历史，含 summary 注入)
   → 注入用户画像 (knowledge_base → 画像摘要)
   → 组装 context → LLM 对话
 
@@ -418,12 +442,17 @@ created_at    DATETIME
   → 后台：画像生成 → knowledge_base / events
 
 新开对话
-  → 当前 Session 归档 (is_active=0, 生成 summary)
+  → 当前 Session 归档 (is_active=0)
   → 角色记忆追加 conversation_summary → character_memories
   → 新建 Session (is_active=1) → 清空对话上下文
   → 角色记忆 + 知识库保留
 
-导出
-  → 按 Session 导出对话历史 (Markdown/JSON)  [→ 5.5]
-  → 按 classification 导出知识库 (JSON)      [→ 5.5]
+切换角色
+  → 弹窗确认 → 自动新开 Session
+  → 旧 Session 摘要归档到旧角色 character_memories
+  → 新 Session 加载新角色记忆
+
+导出 [→ 5.5]
+  → 按 Session 导出对话历史 (Markdown/JSON)
+  → 按 classification 导出知识库 (JSON)
 ```

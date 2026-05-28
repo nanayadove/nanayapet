@@ -1,6 +1,6 @@
 # NetPet - 桌面LLM虚拟宠物
 
-> v1.6.3
+> v1.7.0
 
 基于 Electron + JavaScript 的桌面 AI 宠物框架，定位为 **轻量级酒馆 + 轻量级 Agent 框架**。通过在本地直接调用大语言模型 (LLM) API，打造属于你自己的 AI 桌面伙伴。
 
@@ -10,14 +10,19 @@
 
 - **Electron 桌面应用**：HTML/CSS 构建的现代 UI，支持透明窗口、可拉伸缩放、拖拽、气泡对话
 - **情绪驱动立绘**：LLM 输出 `[emotion=表情]` 前缀标签，自动切换 6 种表情立绘
-- **独立设置窗口**：8 个配置标签页（API/记忆/工具/搜索/知识库/角色管理/搭话/对话管理），支持模型列表下拉选择 + 测试连接
-- **SQLite 记忆系统**：6 表数据库（messages/sessions/events/knowledge_base/tools/meta），支持 Session 对话管理和自动总结压缩
-- **Session 对话管理**：多会话容器，支持新建/切换/删除对话，切换角色自动新开 Session
+- **独立设置窗口**：9 个配置标签页（API/记忆/工具/搜索/知识库/角色管理/搭话/对话管理/知识库管理），支持模型列表下拉选择 + 测试连接
+- **SQLite 记忆系统**：7 表数据库（messages/sessions/events/knowledge_base/character_memories/tools/meta），支持 Session 对话管理和自动总结压缩
+- **Session 对话管理**：多会话容器，支持新建/切换/导出/删除对话，切换角色弹窗确认后自动新开 Session，历史 Session 恢复时加载 summary
+- **角色长久记忆**：`character_memories` 表存储角色跨对话记忆（user_relation/world_knowledge/self_awareness/conversation_summary），Session 归档摘要自动沉淀为角色记忆
 - **角色设定完全解耦**：独立角色文件（`characters/<角色名>/character.json`），支持多角色切换、导入/导出、PNG 角色卡（SillyTavern 兼容）
 - **Agent 工具系统**：两步推理架构，工具模型负责决策，聊天模型专注回复
 - **联网搜索**：支持 Tavily / DuckDuckGo / Serper / Anthropic(Claude原生) 四种引擎，可配置切换
-- **知识库系统**：统一知识库 (knowledge_base)，三类分类：user_profile（用户画像）/ taught（用户教学）/ web（外部知识），自动去重 + 置信度衰减
+- **知识库系统**：统一 knowledge_base，三类分类：user_profile（用户画像）/ lore（世界观设定）/ web（外部知识），自动去重 + 置信度衰减
+- **World Info (Lore)**：世界观设定分类，支持关键词精确匹配触发，对话时自动注入 LLM 上下文；设置界面可快速添加/编辑/删除
+- **知识库管理 UI**：设置界面可直接浏览、搜索、筛选、编辑、删除知识库条目，支持分页和批量操作
+- **导出**：角色设定 Tab 支持导出角色卡 + 会话 + 知识库 (PNG/JSON)，对话管理 Tab 支持快捷导出单个会话
 - **置信度管理**：时间衰减 + 矛盾检测，旧事实自然淡忘，观点变化时自动更新
+- **上下文长度控制**：可配置最近对话轮数 + 总长度上限，超出自动裁剪最早对话，保护角色设定和记忆
 - **流式传输**：SSE 累积模式，降低首字响应延迟
 - **AI SDK**：Vercel AI SDK v6，全链路统一调用层
 - **AI 驱动任务管理**：工具模型自动判断任务完成，无需硬编码关键词匹配
@@ -117,7 +122,7 @@ v1.4.1 起桌面右下角有托盘图标（猫猫头），双击即可恢复。�
 - `schedule` — 设置定时提醒（自然语言时间或ISO时间），到期调LLM生成角色语气提醒
 - `web_search` — 联网搜索（支持 Tavily / DuckDuckGo / Serper / Anthropic），可配置搜索引擎和 API Key
 - `search_knowledge` — 搜索本地统一知识库
-- `remember` — 用户主动教学，存入知识库 taught 分类
+- `remember` — 用户主动教学，存入知识库 user_profile 分类
 
 ### 主动搭话系统
 - **启动问候**：检测离线间隔，超过阈值自动生成角色语气问候
@@ -160,14 +165,14 @@ netpet/
 │   ├── index.html       # 宠物窗口 UI
 │   ├── style.css        # UI 样式
 │   ├── renderer.js      # 前台逻辑
-│   ├── settings.html    # 设置窗口 UI（侧边栏导航，8 个配置页）
+│   ├── settings.html    # 设置窗口 UI（侧边栏导航，9 个配置页）
 │   ├── settings.js      # 设置窗口逻辑
 │   ├── settings-preload.js # 设置窗口 IPC 桥接
 │   ├── config.js        # 配置读写 + API Key 加密存储 + 角色文件加载
 │   ├── llm.js           # LLM 通信核心（两步推理 + 知识库管道 + 标签解析）
 │   ├── ai-provider.js   # AI SDK 动态 import 包装层
 │   ├── tool-prompt.js   # 工具模型提示词模板（含 completed_tasks 规范）
-│   ├── db.js            # SQLite 数据库（6 表：messages/sessions/events/knowledge_base/tools/meta）
+│   ├── db.js            # SQLite 数据库（7 表：messages/sessions/events/knowledge_base/character_memories/tools/meta）
 │   ├── png-card.js      # PNG tEXt 块读写（角色卡嵌入/提取）
 │   └── tools/           # 工具模块
 │       ├── index.js     # 工具路由
@@ -193,7 +198,8 @@ netpet/
 | `messages` | 对话消息 (session_id, role, content) |
 | `sessions` | 对话容器 (character_id, title, summary, is_active) |
 | `events` | 系统事件日志 (offline/summary/profile_update/tool_call) |
-| `knowledge_base` | 统一知识库 (user_profile/taught/web) |
+| `knowledge_base` | 统一知识库 (user_profile/lore/web) |
+| `character_memories` | 角色长久记忆 (user_relation/world_knowledge/self_awareness/conversation_summary) |
 | `tools` | 工具记录 (note/todo/schedule) |
 | `meta` | 键值配置 |
 

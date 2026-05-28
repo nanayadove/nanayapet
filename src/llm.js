@@ -172,7 +172,8 @@ async function callChatModel(config, extraMessages, userContent, isSystem, sessi
     + formatLock
   const modelName = prov.model || 'deepseek-v4-flash'
   const summaryInterval = api.summary_interval || 5
-  const maxLen = Math.max(api.max_history_length || 10, summaryInterval * 2)
+  const maxLen = api.max_history_length || 8
+  const maxContextLen = api.max_context_length || 0
   const temperature = api.temperature ?? 0.7
   const stream = !!api.stream_enabled
 
@@ -187,7 +188,23 @@ async function callChatModel(config, extraMessages, userContent, isSystem, sessi
     chatHistory.push({ role: 'system', content: `[用户画像]: ${profileRow.content}` })
   }
 
+  const charName = config.character_settings?.name || config.active_character || '七夜'
+  const charMemories = db.getCharacterMemories(charName)
+  if (charMemories && charMemories.length > 0) {
+    const relevantMemories = charMemories.filter(m => m.category !== 'conversation_summary')
+    const convSummaries = charMemories.filter(m => m.category === 'conversation_summary')
+    if (convSummaries.length > 0) {
+      const summaryText = convSummaries.map(m => m.content).join('\n')
+      chatHistory.push({ role: 'system', content: `[角色对用户的认知 — 来自历史对话]\n${summaryText}` })
+    }
+    if (relevantMemories.length > 0) {
+      const memoryText = relevantMemories.map(m => `[${m.category}] ${m.content}`).join('\n')
+      chatHistory.push({ role: 'system', content: `[角色自身记忆]\n${memoryText}` })
+    }
+  }
+
   const pending = buildPendingContext(); if (pending) chatHistory.push(pending)
+  const trimStart = chatHistory.length
   chatHistory.push(...db.loadContextForLlm(sessionId, maxLen))
 
   if (!isSystem && userContent) {
@@ -206,10 +223,28 @@ async function callChatModel(config, extraMessages, userContent, isSystem, sessi
     }
     chatHistory.push({ role: 'system', content: injection })
   }
+
+  const loreMatches = db.getLoreMatches(userContent.slice(0, 200))
+  if (loreMatches.length > 0) {
+    const loreInjection = '[系统: 以下是与当前对话相关的世界观设定 (World Info)]\n' +
+      loreMatches.map(l => {
+        const t = (() => { try { return JSON.parse(l.tags || '[]') } catch { return [] } })()
+        return `【${(l.category || '设定').slice(0, 20)}】${l.content.slice(0, 300)}`
+      }).join('\n')
+    chatHistory.push({ role: 'system', content: loreInjection })
+  }
   }
 
   if (extraMessages?.length) for (const m of extraMessages) chatHistory.push(m)
   chatHistory.push({ role: isSystem ? 'system' : 'user', content: finalContent })
+
+  if (maxContextLen > 0) {
+    let total = chatHistory.reduce((s, m) => s + (m.content || '').length, 0)
+    while (total > maxContextLen && trimStart < chatHistory.length - 1) {
+      const removed = chatHistory.splice(trimStart, 1)[0]
+      total -= (removed.content || '').length
+    }
+  }
 
   const aiModel = await makeAiModel(prov.api_key, prov.base_url, modelName)
 

@@ -2,7 +2,7 @@
 
 ## 1. 更新版本号
 
-修改 `package.json` 的 `version` 字段，例如 `"1.5.0"` → `"1.6.0"`
+修改 `package.json` 的 `version` 字段，例如 `"1.6.0"` → `"1.7.0"`
 
 ## 2. 打包
 
@@ -45,7 +45,7 @@ npm run dist
 
 ```bash
 git add .
-git commit -m "v1.6.0: 简短描述"
+git commit -m "v1.7.0: 简短描述"
 git push
 ```
 

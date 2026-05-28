@@ -21,6 +21,16 @@ contextBridge.exposeInMainWorld('api', {
   getSessionList: () => ipcRenderer.invoke('session:list'),
   getActiveSession: () => ipcRenderer.invoke('session:get-active'),
   createSession: () => ipcRenderer.invoke('session:create'),
+  createSessionForCharacter: (charName) => ipcRenderer.invoke('session:create-for-character', charName),
   switchSession: (id) => ipcRenderer.invoke('session:switch', id),
   deleteSession: (id) => ipcRenderer.invoke('session:delete', id),
+
+  queryKnowledge: (options) => ipcRenderer.invoke('knowledge:list', options),
+  createKnowledge: (item) => ipcRenderer.invoke('knowledge:create', item),
+  updateKnowledge: (id, fields) => ipcRenderer.invoke('knowledge:update', id, fields),
+  deleteKnowledge: (ids) => ipcRenderer.invoke('knowledge:delete', ids),
+  getKnowledgeStats: () => ipcRenderer.invoke('knowledge:stats'),
+
+  exportSession: (sessionId, options) => ipcRenderer.invoke('session:export', sessionId, options),
+  exportKnowledge: (options) => ipcRenderer.invoke('knowledge:export', options),
 })

@@ -20,6 +20,7 @@ const btnFetch = document.getElementById('btn-fetch')
 const selSummaryProvider = document.getElementById('sel-summary-provider')
 const inpSummaryInterval = document.getElementById('inp-summary-interval')
 const inpMaxHistory = document.getElementById('inp-max-history')
+const inpMaxContext = document.getElementById('inp-max-context')
 
 // ===== 工具系统页元素 =====
 const selToolProvider = document.getElementById('sel-tool-provider')
@@ -39,8 +40,6 @@ const selCharacter = document.getElementById('sel-character')
 const inpCharName = document.getElementById('inp-char-name')
 const inpCharDisplay = document.getElementById('inp-char-display')
 const btnImportChar = document.getElementById('btn-import-char')
-const btnExportChar = document.getElementById('btn-export-char')
-const selExportFormat = document.getElementById('sel-export-format')
 const charStatus = document.getElementById('char-status')
 
 // ===== 主动搭话页元素 =====
@@ -138,7 +137,8 @@ function applyToUI(config) {
   // 记忆页
   selSummaryProvider.value = api.summary_provider || '同对话服务商'
   inpSummaryInterval.value = api.summary_interval ?? 5
-  inpMaxHistory.value = api.max_history_length ?? 10
+  inpMaxHistory.value = api.max_history_length ?? 8
+  inpMaxContext.value = api.max_context_length ?? 0
 
   // 工具页
   selToolProvider.value = api.tool_provider || '同对话服务商'
@@ -190,6 +190,8 @@ function applyToUI(config) {
 // 角色管理
 // ================================================================
 
+let previousCharacter = ''
+
 async function loadCharacterList(activeName) {
   try {
     const list = await window.api.getCharacterList()
@@ -209,6 +211,7 @@ async function loadCharacterList(activeName) {
       selCharacter.appendChild(opt)
     }
     selCharacter.value = activeName || list[0]?.name || ''
+    previousCharacter = activeName || ''
     charStatus.textContent = activeName ? '已选中' : ''
   } catch (err) {
     charStatus.textContent = '加载失败: ' + err.message
@@ -218,6 +221,7 @@ async function loadCharacterList(activeName) {
 selCharacter.addEventListener('change', async () => {
   const name = selCharacter.value
   if (!name) return
+  if (name === previousCharacter) return
   try {
     await window.api.setActiveCharacter(name)
     const cfg = await window.api.getConfig()
@@ -225,8 +229,20 @@ selCharacter.addEventListener('change', async () => {
     inpCharName.value = cfg.character_settings?.name || ''
     inpCharDisplay.value = cfg.character_settings?.display_name || cfg.character_settings?.name || ''
     inpPrompt.value = cfg.character_settings?.system_prompt || ''
-    charStatus.textContent = '已切换'
-    setTimeout(() => { charStatus.textContent = '已选中' }, 2000)
+
+    const createNew = confirm('切换角色后建议开启新对话，是否同步创建新会话？\n\n选择"确定"将保留当前对话历史并开启新会话。\n选择"取消"则只切换角色，继续使用当前会话。')
+    if (createNew) {
+      const result = await window.api.createSessionForCharacter(name)
+      if (result.success) {
+        charStatus.textContent = '已切换并创建新对话'
+      } else {
+        charStatus.textContent = '已切换 (新对话创建失败: ' + (result.error || '') + ')'
+      }
+    } else {
+      charStatus.textContent = '已切换'
+    }
+    previousCharacter = name
+    setTimeout(() => { charStatus.textContent = '已选中' }, 2500)
   } catch (err) {
     charStatus.textContent = '切换失败: ' + err.message
   }
@@ -253,20 +269,6 @@ btnImportChar.addEventListener('click', async () => {
   }
 })
 
-btnExportChar.addEventListener('click', async () => {
-  try {
-    const format = selExportFormat.value || 'json'
-    const result = await window.api.exportCharacter(format)
-    if (result.success) {
-      charStatus.textContent = '已导出到: ' + result.path
-    } else if (result.reason) {
-      charStatus.textContent = '导出失败: ' + result.reason
-    }
-  } catch (err) {
-    charStatus.textContent = '导出失败: ' + err.message
-  }
-})
-
 // ================================================================
 // 收集配置
 // ================================================================
@@ -289,7 +291,8 @@ function collectFromUI() {
       stream_enabled: inpStream.checked,
       summary_provider: selSummaryProvider.value,
       summary_interval: parseInt(inpSummaryInterval.value) || 5,
-      max_history_length: parseInt(inpMaxHistory.value) || 10,
+      max_history_length: parseInt(inpMaxHistory.value) || 8,
+      max_context_length: parseInt(inpMaxContext.value) || 0,
       tool_provider: selToolProvider.value === '同对话服务商' ? '' : selToolProvider.value,
       tool_model: inpToolModel.value.trim() || '',
     },
@@ -505,13 +508,19 @@ async function loadSessionList() {
           </div>
           <div style="display:flex;gap:4px;flex-shrink:0;">
             ${!s.isActive ? `<button data-action="switch" data-id="${s.id}" style="padding:4px 10px;border:1px solid #2196F3;background:white;color:#2196F3;border-radius:3px;cursor:pointer;font-size:12px;">切换</button>` : ''}
+            <button data-action="export" data-id="${s.id}" data-title="${(s.title || '未命名').replace(/"/g, '&quot;')}" style="padding:4px 8px;border:1px solid #FF9800;background:white;color:#FF9800;border-radius:3px;cursor:pointer;font-size:12px;">导出</button>
             <button data-action="delete" data-id="${s.id}" style="padding:4px 8px;border:1px solid #f44336;background:white;color:#f44336;border-radius:3px;cursor:pointer;font-size:12px;" ${s.isActive ? 'disabled title="不能删除活跃会话"' : ''}>删除</button>
           </div>
         </div>
       `
     }).join('')
 
-    // 绑定按钮事件
+    listEl.querySelectorAll('[data-action="export"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openExportModal(parseInt(btn.dataset.id), btn.dataset.title)
+      })
+    })
+
     listEl.querySelectorAll('[data-action="switch"]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = parseInt(btn.dataset.id)
@@ -542,6 +551,367 @@ document.getElementById('btn-new-session').addEventListener('click', async () =>
   } else {
     statusEl.textContent = '创建失败: ' + result.error
   }
+})
+
+// ================================================================
+// 知识库管理
+// ================================================================
+
+let kbCurrentPage = 1
+let kbCurrentClassification = ''
+let kbCurrentSearch = ''
+
+const kbStats = { profile: document.getElementById('kb-stat-profile'), web: document.getElementById('kb-stat-web'), lore: document.getElementById('kb-stat-lore'), total: document.getElementById('kb-stat-total') }
+const kbFilterClass = document.getElementById('kb-filter-class')
+const kbFilterSearch = document.getElementById('kb-filter-search')
+const kbBtnSearch = document.getElementById('kb-btn-search')
+const kbTableBody = document.getElementById('kb-table-body')
+const kbSelectAll = document.getElementById('kb-select-all')
+const kbBtnDeleteSelected = document.getElementById('kb-btn-delete-selected')
+const kbPageInfo = document.getElementById('kb-page-info')
+const kbBtnPrev = document.getElementById('kb-btn-prev')
+const kbBtnNext = document.getElementById('kb-btn-next')
+
+const CLASS_LABELS = { user_profile: '画像', web: '网页', lore: 'Lore' }
+const CLASS_COLORS = { user_profile: '#e3f2fd', web: '#e8f5e9', lore: '#fff3e0' }
+
+async function loadKnowledgeStats() {
+  try {
+    const stats = await window.api.getKnowledgeStats()
+    kbStats.profile.textContent = stats.user_profile || 0
+    kbStats.web.textContent = stats.web || 0
+    kbStats.lore.textContent = stats.lore || 0
+    kbStats.total.textContent = stats.total || 0
+  } catch (err) { /* ignore */ }
+}
+
+async function loadKnowledgeList() {
+  kbTableBody.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#999;">加载中...</td></tr>'
+  try {
+    const result = await window.api.queryKnowledge({
+      classification: kbCurrentClassification || null,
+      search: kbCurrentSearch || null,
+      page: kbCurrentPage,
+      pageSize: 20
+    })
+    renderKnowledgeTable(result)
+  } catch (err) {
+    kbTableBody.innerHTML = `<tr><td colspan="6" style="padding:20px;text-align:center;color:#f44336;">加载失败: ${err.message}</td></tr>`
+  }
+}
+
+function renderKnowledgeTable(result) {
+  const { items, total, page, pageSize } = result
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
+  kbPageInfo.textContent = `第 ${page} 页 / 共 ${totalPages} 页 (${total} 条)`
+  kbBtnPrev.disabled = page <= 1
+  kbBtnNext.disabled = page >= totalPages
+
+  if (items.length === 0) {
+    kbTableBody.innerHTML = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#999;">暂无数据</td></tr>'
+    kbSelectAll.checked = false
+    kbBtnDeleteSelected.style.display = 'none'
+    return
+  }
+
+  kbTableBody.innerHTML = items.map(item => {
+    const cl = item.classification || 'user_profile'
+    const label = CLASS_LABELS[cl] || cl
+    const color = CLASS_COLORS[cl] || '#f5f5f5'
+    const content = (item.content || '').slice(0, 80) + ((item.content || '').length > 80 ? '...' : '')
+    const category = (item.category || '').slice(0, 10)
+    const conf = Math.round((item.confidence || 0) * 100)
+    const confColor = conf >= 80 ? '#4CAF50' : conf >= 50 ? '#FF9800' : '#f44336'
+
+    return `<tr style="border-bottom:1px solid #eee;" data-id="${item.id}">
+      <td style="padding:4px;text-align:center;"><input type="checkbox" class="kb-row-check" data-id="${item.id}"></td>
+      <td style="padding:4px;"><span style="padding:1px 6px;background:${color};border-radius:3px;font-size:10px;">${label}</span></td>
+      <td style="padding:4px;font-size:11px;color:#666;">${category}</td>
+      <td style="padding:4px;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${(item.content || '').replace(/"/g, '&quot;')}">${content}</td>
+      <td style="padding:4px;text-align:center;color:${confColor};font-weight:bold;">${conf}%</td>
+      <td style="padding:4px;white-space:nowrap;">
+        <button class="kb-edit-btn" data-id="${item.id}" style="padding:2px 6px;border:1px solid #2196F3;background:white;color:#2196F3;border-radius:3px;cursor:pointer;font-size:11px;margin-right:2px;">编辑</button>
+        <button class="kb-del-btn" data-id="${item.id}" style="padding:2px 6px;border:1px solid #f44336;background:white;color:#f44336;border-radius:3px;cursor:pointer;font-size:11px;">删除</button>
+      </td>
+    </tr>`
+  }).join('')
+
+  kbSelectAll.checked = false
+  updateDeleteSelectedBtn()
+
+  kbTableBody.querySelectorAll('.kb-del-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = parseInt(btn.dataset.id)
+      if (!confirm('确定删除该知识条目吗？')) return
+      const res = await window.api.deleteKnowledge([id])
+      if (res.success) {
+        statusEl.textContent = `已删除 ${res.deleted} 条`
+        loadKnowledgeList()
+        loadKnowledgeStats()
+      } else {
+        statusEl.textContent = '删除失败: ' + (res.error || '')
+      }
+    })
+  })
+
+  kbTableBody.querySelectorAll('.kb-edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.id)
+      const item = items.find(i => i.id === id)
+      if (!item) return
+      renderEditRow(item)
+    })
+  })
+
+  kbTableBody.querySelectorAll('.kb-row-check').forEach(cb => {
+    cb.addEventListener('change', updateDeleteSelectedBtn)
+  })
+}
+
+function renderEditRow(item) {
+  const cl = item.classification || 'user_profile'
+  const tags = (() => { try { return JSON.parse(item.tags || '[]') } catch { return [] } })()
+  const tagsStr = Array.isArray(tags) ? tags.join(', ') : ''
+
+  kbTableBody.querySelector(`tr[data-id="${item.id}"]`).innerHTML = `
+    <td style="padding:4px;text-align:center;">编辑</td>
+    <td style="padding:4px;">
+      <select class="kb-edit-class" style="width:100%;padding:3px;font-size:11px;border:1px solid #2196F3;border-radius:3px;">
+        <option value="user_profile" ${cl === 'user_profile' ? 'selected' : ''}>画像</option>
+        <option value="web" ${cl === 'web' ? 'selected' : ''}>网页</option>
+        <option value="lore" ${cl === 'lore' ? 'selected' : ''}>Lore</option>
+      </select>
+    </td>
+    <td style="padding:4px;"><input class="kb-edit-category" value="${(item.category || '').replace(/"/g, '&quot;')}" style="width:100%;padding:3px;font-size:11px;border:1px solid #2196F3;border-radius:3px;"></td>
+    <td style="padding:4px;"><input class="kb-edit-content" value="${(item.content || '').replace(/"/g, '&quot;')}" style="width:100%;padding:3px;font-size:11px;border:1px solid #2196F3;border-radius:3px;"></td>
+    <td style="padding:4px;"><input class="kb-edit-conf" type="number" min="0" max="1" step="0.1" value="${item.confidence || 0.5}" style="width:100%;padding:3px;font-size:11px;border:1px solid #2196F3;border-radius:3px;"></td>
+    <td style="padding:4px;white-space:nowrap;">
+      <button class="kb-save-btn" data-id="${item.id}" style="padding:2px 6px;border:1px solid #4CAF50;background:#4CAF50;color:white;border-radius:3px;cursor:pointer;font-size:11px;margin-right:2px;">保存</button>
+      <button class="kb-cancel-btn" data-id="${item.id}" style="padding:2px 6px;border:1px solid #999;background:white;color:#999;border-radius:3px;cursor:pointer;font-size:11px;">取消</button>
+    </td>`
+
+  const row = kbTableBody.querySelector(`tr[data-id="${item.id}"]`)
+  row.querySelector('.kb-save-btn').addEventListener('click', async () => {
+    const fields = {
+      classification: row.querySelector('.kb-edit-class').value,
+      category: row.querySelector('.kb-edit-category').value.trim(),
+      content: row.querySelector('.kb-edit-content').value.trim(),
+      confidence: parseFloat(row.querySelector('.kb-edit-conf').value) || 0.5,
+    }
+    const res = await window.api.updateKnowledge(item.id, fields)
+    if (res.success) {
+      statusEl.textContent = '已更新'
+      loadKnowledgeList()
+      loadKnowledgeStats()
+    } else {
+      statusEl.textContent = '更新失败: ' + (res.error || '')
+    }
+  })
+  row.querySelector('.kb-cancel-btn').addEventListener('click', () => {
+    loadKnowledgeList()
+  })
+}
+
+function updateDeleteSelectedBtn() {
+  const checked = kbTableBody.querySelectorAll('.kb-row-check:checked')
+  kbBtnDeleteSelected.style.display = checked.length > 0 ? '' : 'none'
+  kbBtnDeleteSelected.textContent = `删除选中 (${checked.length})`
+}
+
+kbSelectAll.addEventListener('change', () => {
+  kbTableBody.querySelectorAll('.kb-row-check').forEach(cb => { cb.checked = kbSelectAll.checked })
+  updateDeleteSelectedBtn()
+})
+
+kbBtnDeleteSelected.addEventListener('click', async () => {
+  const checked = kbTableBody.querySelectorAll('.kb-row-check:checked')
+  if (checked.length === 0) return
+  if (!confirm(`确定删除选中的 ${checked.length} 条知识条目吗？此操作不可撤销。`)) return
+  const ids = Array.from(checked).map(cb => parseInt(cb.dataset.id))
+  const res = await window.api.deleteKnowledge(ids)
+  if (res.success) {
+    statusEl.textContent = `已删除 ${res.deleted} 条`
+    loadKnowledgeList()
+    loadKnowledgeStats()
+  } else {
+    statusEl.textContent = '删除失败: ' + (res.error || '')
+  }
+})
+
+kbFilterClass.addEventListener('change', () => {
+  kbCurrentClassification = kbFilterClass.value
+  kbCurrentPage = 1
+  loadKnowledgeList()
+})
+
+kbBtnSearch.addEventListener('click', () => {
+  kbCurrentSearch = kbFilterSearch.value.trim()
+  kbCurrentPage = 1
+  loadKnowledgeList()
+})
+
+kbFilterSearch.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    kbCurrentSearch = kbFilterSearch.value.trim()
+    kbCurrentPage = 1
+    loadKnowledgeList()
+  }
+})
+
+kbBtnPrev.addEventListener('click', () => {
+  if (kbCurrentPage > 1) { kbCurrentPage--; loadKnowledgeList() }
+})
+
+kbBtnNext.addEventListener('click', () => {
+  kbCurrentPage++
+  loadKnowledgeList()
+})
+
+const kbToggleAdd = document.getElementById('kb-toggle-add')
+const kbAddForm = document.getElementById('kb-add-form')
+const kbBtnAdd = document.getElementById('kb-btn-add')
+const kbAddClass = document.getElementById('kb-add-class')
+const kbAddCategory = document.getElementById('kb-add-category')
+const kbAddContent = document.getElementById('kb-add-content')
+const kbAddTags = document.getElementById('kb-add-tags')
+
+kbToggleAdd.addEventListener('click', () => {
+  const visible = kbAddForm.style.display !== 'none'
+  kbAddForm.style.display = visible ? 'none' : ''
+  kbToggleAdd.textContent = visible ? '＋ 快速添加 Lore' : '－ 收起'
+})
+
+kbBtnAdd.addEventListener('click', async () => {
+  const content = kbAddContent.value.trim()
+  if (!content) { statusEl.textContent = '请输入内容'; return }
+
+  const tags = kbAddTags.value.split(/[,，]/).map(t => t.trim()).filter(Boolean)
+  const item = {
+    classification: kbAddClass.value,
+    category: kbAddCategory.value.trim() || '未分类',
+    content,
+    tags,
+    confidence: kbAddClass.value === 'lore' ? 1.0 : 0.9
+  }
+
+  const res = await window.api.createKnowledge(item)
+  if (res.success) {
+    statusEl.textContent = `已添加 [${kbAddClass.value}] 条目`
+    kbAddContent.value = ''
+    kbAddTags.value = ''
+    loadKnowledgeList()
+    loadKnowledgeStats()
+  } else {
+    statusEl.textContent = '添加失败: ' + (res.error || '')
+  }
+})
+
+// ================================================================
+// 会话导出弹窗（对话管理 Tab）
+// ================================================================
+
+let exportSessionId = null
+const exportModal = document.getElementById('export-modal')
+const exportTitle = document.getElementById('export-title')
+const exportModalCancel = document.getElementById('export-modal-cancel')
+const exportModalConfirm = document.getElementById('export-modal-confirm')
+
+function openExportModal(id, title) {
+  exportSessionId = id
+  exportTitle.textContent = title || '未命名'
+  exportModal.style.display = 'flex'
+}
+
+function closeExportModal() {
+  exportModal.style.display = 'none'
+  exportSessionId = null
+}
+
+exportModalCancel.addEventListener('click', closeExportModal)
+exportModal.addEventListener('click', (e) => { if (e.target === exportModal) closeExportModal() })
+
+exportModalConfirm.addEventListener('click', async () => {
+  const format = document.querySelector('input[name="export-format"]:checked')?.value || 'json'
+  closeExportModal()
+
+  try {
+    const res = await window.api.exportSession(exportSessionId, { format })
+    if (res.success) {
+      statusEl.textContent = '已导出到: ' + res.path.split(/[\\/]/).pop()
+    } else if (res.reason !== 'cancelled') {
+      statusEl.textContent = '导出失败: ' + res.reason
+    }
+  } catch (err) {
+    statusEl.textContent = '导出失败: ' + err.message
+  }
+  exportSessionId = null
+})
+
+// ================================================================
+// 角色导出（角色设定 Tab 内）
+// ================================================================
+
+const exportSessionSelect = document.getElementById('export-session-select')
+const btnCharExportBundle = document.getElementById('btn-char-export-bundle')
+
+async function loadExportSessionList() {
+  try {
+    const sessions = await window.api.getSessionList()
+    exportSessionSelect.innerHTML = '<option value="">-- 仅导出角色卡 --</option>'
+    sessions.forEach(s => {
+      const opt = document.createElement('option')
+      opt.value = s.id
+      opt.textContent = `[${s.characterId}] ${s.title || '未命名'} (${s.messageCount}条)`
+      exportSessionSelect.appendChild(opt)
+    })
+  } catch (err) { /* ignore */ }
+}
+
+btnCharExportBundle.addEventListener('click', async () => {
+  const format = document.querySelector('input[name="char-export-format"]:checked')?.value || 'json'
+  const sessionId = exportSessionSelect.value ? parseInt(exportSessionSelect.value) : null
+  const charName = selCharacter.value || currentConfig?.active_character || '七夜'
+
+  const opts = {
+    format,
+    charName,
+    includeLore: document.querySelector('.char-export-opt[data-key="includeLore"]')?.checked || false,
+    includeProfile: document.querySelector('.char-export-opt[data-key="includeProfile"]')?.checked || false,
+    includeWeb: document.querySelector('.char-export-opt[data-key="includeWeb"]')?.checked || false,
+  }
+
+  try {
+    const res = await window.api.exportSession(sessionId, opts)
+    if (res.success) {
+      charStatus.textContent = '已导出: ' + res.path.split(/[\\/]/).pop()
+      setTimeout(() => { charStatus.textContent = '已选中' }, 3000)
+    } else if (res.reason !== 'cancelled') {
+      charStatus.textContent = '导出失败: ' + res.reason
+    }
+  } catch (err) {
+    charStatus.textContent = '导出失败: ' + err.message
+  }
+})
+
+// 进入角色 Tab 时加载会话列表
+document.querySelectorAll('.tab').forEach(tab => {
+  if (tab.dataset.page === 'page-character') {
+    const origClick = tab.onclick
+    tab.addEventListener('click', () => {
+      loadExportSessionList()
+    })
+  }
+})
+
+// Auto-load when tab is activated (handled in tab click listener above)
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    if (tab.dataset.page === 'page-knowledge-mgr') {
+      loadKnowledgeStats()
+      loadKnowledgeList()
+    }
+  })
 })
 
 loadConfig()

@@ -170,6 +170,18 @@ async function getDb() {
   try { db.run('ALTER TABLE messages ADD COLUMN session_id INTEGER') } catch {}
   try { db.run('ALTER TABLE sessions ADD COLUMN last_summarized_msg_id INTEGER') } catch {}
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS character_memories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      character_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      content TEXT NOT NULL,
+      confidence REAL DEFAULT 0.5,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
   // 迁移：messages 表拆分 (v1 → v2)
   if (!getMeta('schema_v2')) migrateSchemaV2()
 
@@ -183,13 +195,26 @@ async function getDb() {
 // ================================================================
 function saveDb() {
   if (!db) return
-  // db.export() — 把整个数据库序列化为 Uint8Array（字节数组）
   const data = db.export()
-  // Buffer.from(data) — 把 Uint8Array 转成 Node.js 的 Buffer 类型
-  // fs.writeFileSync 要求 Buffer 类型作为输入
   const buffer = Buffer.from(data)
-  // fs.writeFileSync(路径, 内容) — 同步写入文件，覆盖原有内容
   fs.writeFileSync(DB_PATH, buffer)
+}
+
+const _messageCache = new Map()
+
+function getCachedMessages(sessionId) {
+  const entry = _messageCache.get(sessionId)
+  if (entry && (Date.now() - entry.updatedAt < 60000)) return entry.messages
+  return null
+}
+
+function setCachedMessages(sessionId, messages) {
+  _messageCache.set(sessionId, { messages, updatedAt: Date.now() })
+}
+
+function invalidateMessageCache(sessionId) {
+  if (sessionId) _messageCache.delete(sessionId)
+  else _messageCache.clear()
 }
 
 // ================================================================
@@ -204,6 +229,7 @@ function saveMessage(sessionId, role, content) {
   stmt.run([sessionId, role, content])
   stmt.free()
   saveDb()
+  invalidateMessageCache(sessionId)
 }
 
 // loadContextForLlm(sessionId, maxLen) — 加载指定 session 的最近对话
@@ -212,6 +238,10 @@ function saveMessage(sessionId, role, content) {
 // 如果有 session.summary，先注入 summary，再无 summary 部分的最近消息
 function loadContextForLlm(sessionId, maxLen) {
   if (!sessionId) { const rows = []; return rows }
+
+  const cached = getCachedMessages(sessionId)
+  if (cached) return cached.slice(0, maxLen || cached.length)
+
   const sessionStmt = db.prepare('SELECT summary FROM sessions WHERE id = ?')
   sessionStmt.bind([sessionId])
   const sessionRow = sessionStmt.step() ? sessionStmt.getAsObject() : null
@@ -233,6 +263,7 @@ function loadContextForLlm(sessionId, maxLen) {
   }
   stmt.free()
 
+  setCachedMessages(sessionId, messages)
   return messages
 }
 
@@ -459,7 +490,7 @@ function setMeta(key, value) {
 // 统一知识库 (knowledge_base) CRUD
 // ================================================================
 // v1.5→v1.6: facts + knowledge 合并为 knowledge_base 表
-// classification: 'user_profile' | 'taught' | 'web'
+// classification: 'user_profile' | 'web' | 'lore'
 
 function saveKnowledgeItem({ classification, category, content, tags, confidence, source_msg_id, source, source_url }) {
   const stmt = db.prepare(
@@ -598,6 +629,107 @@ function getAllKnowledgeByClassification(classification) {
   while (stmt.step()) { rows.push(stmt.getAsObject()) }
   stmt.free()
   return rows
+}
+
+function queryKnowledgeBase({ classification, search, page, pageSize }) {
+  let where = 'WHERE 1=1'
+  const params = []
+
+  if (classification) {
+    const classes = Array.isArray(classification) ? classification : [classification]
+    where += ' AND classification IN (' + classes.map(() => '?').join(',') + ')'
+    params.push(...classes)
+  }
+
+  const q = (search || '').replace(/[%_]/g, '')
+  if (q) {
+    const like = `%${q}%`
+    where += ' AND (content LIKE ? OR category LIKE ? OR tags LIKE ?)'
+    params.push(like, like, like)
+  }
+
+  const pg = Math.max(1, page || 1)
+  const ps = Math.min(100, Math.max(5, pageSize || 20))
+  const offset = (pg - 1) * ps
+
+  const countSql = `SELECT count(*) as cnt FROM knowledge_base ${where}`
+  const countStmt = db.prepare(countSql)
+  countStmt.bind(params)
+  countStmt.step()
+  const total = countStmt.getAsObject().cnt
+  countStmt.free()
+
+  const dataSql = `SELECT * FROM knowledge_base ${where} ORDER BY id DESC LIMIT ? OFFSET ?`
+  const dataStmt = db.prepare(dataSql)
+  dataStmt.bind([...params, ps, offset])
+  const rows = []
+  while (dataStmt.step()) { rows.push(dataStmt.getAsObject()) }
+  dataStmt.free()
+
+  return { items: rows, total, page: pg, pageSize: ps }
+}
+
+function updateKnowledgeItem(id, fields) {
+  const sets = []
+  const params = []
+  if (fields.classification !== undefined) { sets.push('classification = ?'); params.push(fields.classification) }
+  if (fields.category !== undefined) { sets.push('category = ?'); params.push(fields.category) }
+  if (fields.content !== undefined) { sets.push('content = ?'); params.push(fields.content) }
+  if (fields.tags !== undefined) { sets.push('tags = ?'); params.push(JSON.stringify(fields.tags)) }
+  if (fields.confidence !== undefined) { sets.push('confidence = ?'); params.push(fields.confidence) }
+  if (fields.source !== undefined) { sets.push('source = ?'); params.push(fields.source) }
+  if (fields.source_url !== undefined) { sets.push('source_url = ?'); params.push(fields.source_url) }
+  if (sets.length === 0) return false
+
+  sets.push("updated_at = datetime('now')")
+  params.push(id)
+  const stmt = db.prepare(`UPDATE knowledge_base SET ${sets.join(', ')} WHERE id = ?`)
+  stmt.run(params)
+  stmt.free()
+  saveDb()
+  return true
+}
+
+function deleteKnowledgeItems(ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return 0
+  const placeholders = ids.map(() => '?').join(',')
+  db.run(`DELETE FROM knowledge_base WHERE id IN (${placeholders})`, ids)
+  const changes = db.exec('SELECT changes() as cnt')[0].values[0][0]
+  saveDb()
+  return changes
+}
+
+function getKnowledgeStats() {
+  const stmt = db.prepare("SELECT classification, count(*) as cnt FROM knowledge_base GROUP BY classification")
+  const stats = { user_profile: 0, web: 0, lore: 0, total: 0 }
+  while (stmt.step()) {
+    const row = stmt.getAsObject()
+    stats[row.classification] = row.cnt
+    stats.total += row.cnt
+  }
+  stmt.free()
+  return stats
+}
+
+function getLoreMatches(userText) {
+  if (!userText) return []
+  const userLower = userText.toLowerCase()
+  const items = getAllKnowledgeByClassification('lore')
+  if (items.length === 0) return []
+
+  const matches = []
+  for (const item of items) {
+    try {
+      const tags = JSON.parse(item.tags || '[]')
+      if (!Array.isArray(tags) || tags.length === 0) continue
+      const hit = tags.some(tag => {
+        const t = (tag || '').toLowerCase().trim()
+        return t && userLower.includes(t)
+      })
+      if (hit) matches.push(item)
+    } catch { /* skip malformed tags */ }
+  }
+  return matches
 }
 
 // ================================================================
@@ -774,6 +906,11 @@ function setLatestProfile(content) {
 // ================================================================
 
 function createSession(characterId, title) {
+  const oldSession = getActiveSession()
+  if (oldSession && oldSession.summary && oldSession.character_id === characterId) {
+    saveCharacterMemory(characterId, 'conversation_summary', oldSession.summary, 0.7)
+  }
+
   db.run("UPDATE sessions SET is_active = 0 WHERE is_active = 1")
   const stmt = db.prepare(
     'INSERT INTO sessions (character_id, title, is_active) VALUES (?, ?, 1)'
@@ -807,6 +944,7 @@ function switchSession(sessionId) {
   stmt.step()
   stmt.free()
   saveDb()
+  invalidateMessageCache(sessionId)
 }
 
 function deleteSession(sessionId) {
@@ -819,6 +957,15 @@ function deleteSession(sessionId) {
   stmt.step()
   stmt.free()
   saveDb()
+  invalidateMessageCache(sessionId)
+}
+
+function getSessionById(sessionId) {
+  const stmt = db.prepare('SELECT * FROM sessions WHERE id = ?')
+  stmt.bind([sessionId])
+  const result = stmt.step() ? stmt.getAsObject() : null
+  stmt.free()
+  return result
 }
 
 function archiveSession(sessionId) {
@@ -878,6 +1025,87 @@ function getEventByType(type, limit) {
   while (stmt.step()) { rows.push(stmt.getAsObject()) }
   stmt.free()
   return rows
+}
+
+// ================================================================
+// 角色记忆 (character_memories) CRUD
+// ================================================================
+
+function saveCharacterMemory(characterId, category, content, confidence) {
+  const existing = findSimilarCharacterMemory(characterId, content)
+  if (existing) {
+    const decayed = existing.confidence * Math.exp(-0.01 * Math.max(0, (Date.now() - new Date(existing.updated_at || existing.created_at).getTime()) / (1000 * 60 * 60 * 24)))
+    const newConf = Math.min(1, Math.max(0, decayed + 0.15))
+    const stmt = db.prepare("UPDATE character_memories SET confidence = ?, updated_at = datetime('now') WHERE id = ?")
+    stmt.run([newConf, existing.id])
+    stmt.free()
+    saveDb()
+    return existing.id
+  }
+
+  const stmt = db.prepare(
+    'INSERT INTO character_memories (character_id, category, content, confidence) VALUES (?, ?, ?, ?)'
+  )
+  stmt.run([characterId, category, content, confidence || 0.5])
+  const id = db.exec('SELECT last_insert_rowid() as id')[0].values[0][0]
+  stmt.free()
+  saveDb()
+  return id
+}
+
+function findSimilarCharacterMemory(characterId, content) {
+  const searchText = (content || '').slice(0, 100).replace(/[%_]/g, '')
+  if (!searchText) return null
+  const keywords = searchText.split(/[\s,，。！？、]+/).filter(k => k.length >= 2).slice(0, 5)
+  let bestMatch = null
+  let bestScore = 0
+  for (const kw of keywords) {
+    const stmt = db.prepare('SELECT * FROM character_memories WHERE character_id = ? AND content LIKE ?')
+    stmt.bind([characterId, `%${kw}%`])
+    while (stmt.step()) {
+      const row = stmt.getAsObject()
+      const tgt = (row.content || '').toLowerCase()
+      const src = searchText.toLowerCase()
+      let score = 0
+      const longer = src.length >= tgt.length ? src : tgt
+      const shorter = src.length >= tgt.length ? tgt : src
+      if (shorter.length === 0) continue
+      for (let i = 0; i <= shorter.length - 3; i++) {
+        if (longer.includes(shorter.substring(i, i + 3))) score++
+      }
+      const similarity = score / Math.max(shorter.length - 2, 1)
+      if (similarity > bestScore && similarity > 0.6) {
+        bestScore = similarity
+        bestMatch = row
+      }
+    }
+    stmt.free()
+    if (bestMatch) break
+  }
+  return bestMatch
+}
+
+function getCharacterMemories(characterId, category) {
+  let sql = 'SELECT * FROM character_memories WHERE character_id = ?'
+  const params = [characterId]
+  if (category) {
+    sql += ' AND category = ?'
+    params.push(category)
+  }
+  sql += ' ORDER BY confidence DESC LIMIT 20'
+  const stmt = db.prepare(sql)
+  stmt.bind(params)
+  const rows = []
+  while (stmt.step()) { rows.push(stmt.getAsObject()) }
+  stmt.free()
+  return rows
+}
+
+function deleteCharacterMemory(id) {
+  const stmt = db.prepare('DELETE FROM character_memories WHERE id = ?')
+  stmt.run([id])
+  stmt.free()
+  saveDb()
 }
 
 // ================================================================
@@ -998,6 +1226,11 @@ module.exports = {
   findSimilarItem,
   searchKnowledgeBase,
   getAllKnowledgeByClassification,
+  queryKnowledgeBase,
+  updateKnowledgeItem,
+  deleteKnowledgeItems,
+  getKnowledgeStats,
+  getLoreMatches,
   migrateToUnifiedKnowledge,
   getMessagesForFactExtraction,
   getUnprocessedFactCount,
@@ -1011,6 +1244,7 @@ module.exports = {
   createSession,
   getActiveSession,
   getSessionList,
+  getSessionById,
   switchSession,
   deleteSession,
   archiveSession,
@@ -1018,4 +1252,11 @@ module.exports = {
   getLatestMessageIdForSession,
   updateSessionSummary,
   migrateSchemaV2,
+  getCachedMessages,
+  setCachedMessages,
+  invalidateMessageCache,
+  saveCharacterMemory,
+  findSimilarCharacterMemory,
+  getCharacterMemories,
+  deleteCharacterMemory,
 }

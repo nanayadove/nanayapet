@@ -132,3 +132,13 @@ window.api.onProactiveGreeting((data) => {
   currentEmotion = data.emotion || 'idle'
   updateImage(currentEmotion)
 })
+
+// ===== Session 变更监听 =====
+// 当用户在设置窗口切换角色、新开会话、恢复历史会话时触发
+window.api.onSessionChanged((data) => {
+  bubble.textContent = ''
+  bubble.classList.remove('show')
+  currentEmotion = 'idle'
+  updateImage('idle')
+  characterName = data.characterId || characterName
+})

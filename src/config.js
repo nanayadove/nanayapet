@@ -198,7 +198,8 @@ function load() {
         stream_enabled: true,
         summary_provider: '同对话服务商',
         summary_interval: 5,
-        max_history_length: 10,
+        max_history_length: 8,
+        max_context_length: 0,
       },
       character_settings: {
         name: '七夜',

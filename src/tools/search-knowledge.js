@@ -4,7 +4,7 @@
  * 搜索统一 knowledge_base 表。
  * 支持按 classification 过滤。
  *
- * @param {object} params — { query: 搜索关键词, classification?: 'user_profile'|'taught'|'web' }
+ * @param {object} params — { query: 搜索关键词, classification?: 'user_profile'|'web'|'lore' }
  * @returns {{ success: boolean, result: string, data?: object }}
  */
 const db = require('../db')
@@ -36,7 +36,7 @@ function execute(params) {
     groups[cls].push(item)
   }
 
-  const labels = { user_profile: '用户画像', taught: '用户教学', web: '外部知识' }
+  const labels = { user_profile: '用户画像', web: '外部知识', lore: '世界观设定' }
   for (const [cls, group] of Object.entries(groups)) {
     parts.push(`\n【${labels[cls] || cls}】`)
     group.forEach((item, i) => {
