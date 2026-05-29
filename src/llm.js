@@ -377,7 +377,7 @@ async function summarizeMemory(config, summaryData, sessionId) {
       stream: false,
       label: '总结模型',
     })).trim()
-    db.updateSessionSummary(sessionId, '[SUMMARY] ' + summaryText)
+    db.updateSessionSummary(sessionId, summaryText)
     console.log('记忆总结已保存:', summaryText.substring(0, 50) + '...')
   } catch (err) {
     console.error('后台总结记忆失败:', err.message)
