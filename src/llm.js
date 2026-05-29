@@ -232,7 +232,7 @@ async function callChatModel(config, extraMessages, userContent, isSystem, sessi
     let injected = 0
     for (const item of relevantItems) {
       if (injected >= maxItems) break
-      const label = item.classification === 'user_profile' ? '用户画像' : (item.classification === 'web' ? '外部知识' : '知识')
+      const label = item.classification === 'user_profile' ? '用户画像' : (item.classification === 'web' ? '外部知识' : (item.classification === 'lore' ? '世界观设定' : '知识'))
       injection += `- [${label}] ${item.content.slice(0, 200)}\n`
       injected++
     }
@@ -583,7 +583,7 @@ ${factsText}
       stream: false,
       label: '知识模型-画像生成',
     })).trim()
-    db.setLatestProfile('[PROFILE] ' + profileText)
+    db.setLatestProfile(profileText)
     db.setMeta('last_profile_generation', new Date().toISOString())
     db.setMeta('facts_count_at_last_profile', String(facts.length))
     console.log('[Profile] 用户画像已更新')
