@@ -18,13 +18,11 @@
 //   ipcMain: 主进程端的 IPC 接收器（接收渲染进程发来的消息）
 //   safeStorage: 操作系统级加密 API（Windows DPAPI / macOS Keychain）
 
-// require('electron') — 引入 Electron 框架
-// 解构赋值 { app, BrowserWindow, ... } 同时取出多个导出项
-// 等价于：
-//   const electron = require('electron')
-//   const app = electron.app
-//   const BrowserWindow = electron.BrowserWindow
-//   ...以此类推
+if (process.platform === 'win32') {
+  require('child_process').execSync('chcp 65001', { stdio: 'ignore' })
+  process.stdout.setDefaultEncoding('utf-8')
+}
+
 const { app, BrowserWindow, ipcMain, safeStorage, Tray, Menu, nativeImage, Notification, dialog, protocol } = require('electron')
 
 // require('path') — Node.js 内置模块，处理文件路径

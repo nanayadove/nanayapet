@@ -17,6 +17,7 @@ function getDataDir() {
   return path.join(__dirname, '..')
 }
 const LOG = path.join(getDataDir(), 'netpet-error.log')
+const PROMPT_LOG = path.join(getDataDir(), 'netpet-prompt.log')
 function errLog(msg) {
   const line = `[${new Date().toISOString()}] [LLM] ${msg}\n`
   console.error(line.trim())
@@ -67,20 +68,34 @@ async function callLLM({ aiModel, messages, temperature, stream, label }) {
   const phase = label || 'LLM'
   const labelStr = `[${phase}]`
 
+  const sep = '━'.repeat(60)
+  let promptLog = `\n${sep}\n[${new Date().toISOString()}] [${phase}]\n${sep}\n`
+  for (const m of messages) {
+    promptLog += `\n── ROLE: ${m.role} ──\n${(m.content || '').slice(0, 2000)}\n`
+  }
+  promptLog += `${sep}\n`
+  try { fs.appendFileSync(PROMPT_LOG, promptLog, 'utf-8') } catch {}
+
   if (stream) {
     console.log(`${labelStr} 流式请求开始`)
-    const result = sdk.streamText({ model: aiModel, messages, temperature })
+    const result = sdk.streamText({ model: aiModel, messages, temperature, maxRetries: 1,
+      experimental_allowSystemInMessages: true })
     let text = ''
     for await (const chunk of result.textStream) { text += chunk }
     const elapsed = Date.now() - start
     console.log(`${labelStr} 流式完成 (${elapsed}ms, ${text.length}字)`)
+    const respLog = `[回复] (${elapsed}ms, ${text.length}字)\n${text.slice(0, 3000)}\n${sep}\n\n`
+    try { fs.appendFileSync(PROMPT_LOG, respLog, 'utf-8') } catch {}
     return text
   }
   console.log(`${labelStr} 请求开始`)
-  const result = await sdk.generateText({ model: aiModel, messages, temperature })
+  const result = await sdk.generateText({ model: aiModel, messages, temperature, maxRetries: 1,
+    experimental_allowSystemInMessages: true })
   const elapsed = Date.now() - start
   const usage = result.usage ? ` 输入${result.usage.promptTokens}t 输出${result.usage.completionTokens}t` : ''
   console.log(`${labelStr} 完成 (${elapsed}ms${usage})`)
+  const respLog = `[回复] (${elapsed}ms${usage})\n${(result.text || '').slice(0, 3000)}\n${sep}\n\n`
+  try { fs.appendFileSync(PROMPT_LOG, respLog, 'utf-8') } catch {}
   return result.text
 }
 
