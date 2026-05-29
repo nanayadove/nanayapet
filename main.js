@@ -464,7 +464,13 @@ function checkIdleGreeting() {
   idleProbability = baseProb
   lastInteractionTime = Date.now()
 
-  const systemContent = `[系统通知] 用户已经一段时间没有理你了。
+  let elapsedStr = ''
+  const mins = Math.round(elapsedMs / 60000)
+  if (mins < 60) elapsedStr = `${mins}分钟`
+  else if (mins < 1440) elapsedStr = `${Math.round(mins / 60)}小时`
+  else elapsedStr = `${Math.round(mins / 1440)}天`
+
+  const systemContent = `[系统通知] 用户已经 ${elapsedStr} 没有理你了。
 请根据你的角色设定，对其发起询问吧。可以问ta在做什么、关心一下、或者吐槽ta冷落了你。
 保持1-2句话，不要太长。`
 
