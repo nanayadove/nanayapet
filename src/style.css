@@ -200,6 +200,14 @@ body.collapsed #expand-btn {
   display: block;
 }
 
+body.collapsed #sidebar {
+  -webkit-app-region: drag;
+}
+
+body.collapsed #sidebar button {
+  -webkit-app-region: no-drag;
+}
+
 /* ================================================================
    右侧 — 工作区
    ================================================================ */
