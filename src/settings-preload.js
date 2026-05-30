@@ -33,4 +33,6 @@ contextBridge.exposeInMainWorld('api', {
 
   exportSession: (sessionId, options) => ipcRenderer.invoke('session:export', sessionId, options),
   exportKnowledge: (options) => ipcRenderer.invoke('knowledge:export', options),
+
+  applyTheme: (color) => ipcRenderer.invoke('theme:apply', color),
 })

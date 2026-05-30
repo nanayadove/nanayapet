@@ -1,144 +1,318 @@
-// ===== renderer.js — 宠物窗口前端逻辑 =====
-//
-// 这个文件在渲染进程（网页环境）中运行，可以访问浏览器 DOM API，
-// 但不能直接访问 Node.js 或 Electron 的内部 API。
-// 要通过 window.api（preload.js 暴露）和主进程通信。
-//
-// 浏览器 DOM API 速查：
-//   document.getElementById(id)     — 按 ID 获取页面元素
-//   element.textContent = '文本'     — 设置元素的纯文本内容
-//   element.style.属性 = '值'        — 设置 CSS 样式
-//   element.classList.add('类名')   — 添加 CSS 类
-//   element.addEventListener(事件, fn) — 注册事件监听
-//   element.src = '路径'             — 设置图片的源路径
+// ===== renderer.js — 一体式桌面应用（可折叠抽屉） =====
 
-// ===== 获取页面元素 =====
-// document.getElementById() — 浏览器内置方法，通过 HTML 中元素的 id 属性找到它
-// 如果找不到返回 null
-const bubble = document.getElementById('bubble')
 const petImage = document.getElementById('pet-image')
-const petImageArea = document.getElementById('image-area')
-const inputField = document.getElementById('input-field')
-const topBar = document.getElementById('top-bar')
+const emotionLabel = document.getElementById('emotion-label')
+const messageList = document.getElementById('message-list')
+const drawerInput = document.getElementById('drawer-input')
+const sendBtn = document.getElementById('send-btn')
+const terminalPanel = document.getElementById('terminal-panel')
+const terminalOutput = document.getElementById('terminal-output')
+const modeTabs = document.querySelectorAll('.mode-tab')
+const titlebarName = document.getElementById('titlebar-name')
+const collapseBtn = document.getElementById('collapse-btn')
+const expandBtn = document.getElementById('expand-btn')
 
-// 当前情绪状态（初始 idle）
 let currentEmotion = 'idle'
-// isLoading 是互斥锁：用户发送消息后设为 true，收到回复后才设为 false
-// 防止用户在等待回复时连续按回车发多条消息
 let isLoading = false
-
-// ===== 启动时加载配置 =====
-// 窗口尺寸由 CSS flex + 比例自适应，不再硬编码像素
 let characterName = '七夜'
+let currentMode = 'chat'
 
 window.api.getConfig().then(config => {
   characterName = config.character_settings?.name || '七夜'
-  showBubble(`只是一只${config.character_settings?.display_name || characterName}。`)
+  const displayName = config.character_settings?.display_name || characterName
+  titlebarName.textContent = displayName
+  addSystemMessage(`只是一只${displayName}。`)
+  const ui = config.ui_settings || {}
+  applyTheme(ui.theme_bg || ui.theme_color || '#1a1a24', ui.theme_accent || ui.theme_color || '#5a6ac0')
 }).catch(() => {
-  showBubble('配置加载失败，请点击 设置 API Key')
+  addSystemMessage('配置加载失败，请点击设置 API Key')
 })
 
-// ===== 发送消息 =====
-// addEventListener('keydown', callback) — 键盘按下事件监听
-// e.key 是按下的是哪个键（'Enter'、'a'、'Escape' 等）
-inputField.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    // .trim() — 去掉字符串首尾空白字符
-    const text = inputField.value.trim()
-    // 空文本或正在加载中，不处理
-    if (!text || isLoading) return
+// ================================================================
+// 抽屉展开/收起
+// ================================================================
 
-    // 清空输入框，显示加载状态
-    inputField.value = ''
-    showBubble('...')
-    isLoading = true
+let savedWorkspaceWidth = 480
 
-    // window.api.sendMessage(text) — 通过 IPC 发送消息给主进程
-    // 返回 Promise：.then() 成功 / .catch() 失败 / .finally() 无论成败都执行
-    window.api.sendMessage(text)
-      .then(result => {
-        // result = { reply: '回复文本', emotion: '情绪标签' }
-        currentEmotion = result.emotion || 'idle'
-        updateImage(currentEmotion)
-        showBubble(result.reply)
-      })
-      .catch(err => {
-        // 网络错误或 API 故障时显示错误信息
-        showBubble(`故障:\n${err.message}`)
-        currentEmotion = 'confused'
-        updateImage('confused')
-      })
-      .finally(() => {
-        // 不管成功还是失败，最后都要解锁
-        isLoading = false
-      })
+function expandWorkspace() {
+  document.body.classList.remove('collapsed')
+  collapseBtn.textContent = '◀'
+  collapseBtn.title = '收起面板'
+  window.api.resizeWindow(240 + savedWorkspaceWidth, null)
+}
+
+function collapseWorkspace() {
+  const w = document.body.offsetWidth
+  savedWorkspaceWidth = Math.max(w - 240, 280)
+  document.body.classList.add('collapsed')
+  collapseBtn.textContent = '▶'
+  collapseBtn.title = '展开面板'
+  window.api.resizeWindow(240, null)
+}
+
+function toggleWorkspace() {
+  if (document.body.classList.contains('collapsed')) {
+    expandWorkspace()
+  } else {
+    collapseWorkspace()
   }
+}
+
+collapseBtn.addEventListener('click', toggleWorkspace)
+if (expandBtn) expandBtn.addEventListener('click', expandWorkspace)
+
+// ================================================================
+// 模式切换
+// ================================================================
+
+modeTabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    modeTabs.forEach(t => t.classList.remove('active'))
+    tab.classList.add('active')
+    currentMode = tab.dataset.mode
+    if (currentMode === 'work') {
+      terminalPanel.classList.remove('hidden')
+    } else {
+      terminalPanel.classList.add('hidden')
+    }
+  })
 })
 
-// ===== 更新立绘 =====
-// emotion 是 LLM 返回的情绪标签，对应 assets/ 目录下的 PNG 图片
-// idle → assets/idle.png, happy → assets/happy.png, ...
+// ================================================================
+// 发送消息
+// ================================================================
+
+function sendMessage() {
+  const text = drawerInput.value.trim()
+  if (!text || isLoading) return
+
+  drawerInput.value = ''
+  addUserMessage(text)
+  addSystemMessage('...')
+  setSending(true)
+
+  window.api.sendMessage(text)
+    .then(result => {
+      removePendingDots()
+      currentEmotion = result.emotion || 'idle'
+      updateImage(currentEmotion)
+      addAssistantMessage(result.reply)
+    })
+    .catch(err => {
+      removePendingDots()
+      addSystemMessage(`故障: ${err.message}`)
+      currentEmotion = 'confused'
+      updateImage('confused')
+    })
+    .finally(() => {
+      setSending(false)
+    })
+}
+
+function removePendingDots() {
+  const last = messageList.lastElementChild
+  if (last && last.classList.contains('system') && last.textContent === '...') {
+    last.remove()
+  }
+}
+
+drawerInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendMessage()
+})
+
+sendBtn.addEventListener('click', sendMessage)
+
+function setSending(loading) {
+  isLoading = loading
+  sendBtn.disabled = loading
+  drawerInput.disabled = loading
+}
+
+// ================================================================
+// 消息列表
+// ================================================================
+
+function addUserMessage(text) {
+  const el = document.createElement('div')
+  el.className = 'message user'
+  el.innerHTML = `${escapeHtml(text)}<span class="msg-time">${formatTime(new Date())}</span>`
+  messageList.appendChild(el)
+  scrollToBottom()
+}
+
+function addAssistantMessage(text) {
+  const el = document.createElement('div')
+  el.className = 'message assistant'
+  el.innerHTML = `${escapeHtml(text)}<span class="msg-time">${formatTime(new Date())}</span>`
+  messageList.appendChild(el)
+  scrollToBottom()
+}
+
+function addSystemMessage(text) {
+  const el = document.createElement('div')
+  el.className = 'message system'
+  el.textContent = text
+  messageList.appendChild(el)
+  scrollToBottom()
+}
+
+function scrollToBottom() {
+  messageList.scrollTop = messageList.scrollHeight
+}
+
+// ================================================================
+// 终端输出
+// ================================================================
+
+function setTerminalOutput(text) {
+  terminalOutput.textContent = text
+  terminalPanel.classList.remove('hidden')
+}
+
+function clearTerminal() {
+  terminalOutput.textContent = ''
+}
+
+document.getElementById('terminal-copy-btn').addEventListener('click', () => {
+  navigator.clipboard.writeText(terminalOutput.textContent).catch(() => {})
+})
+
+document.getElementById('terminal-expand-btn').addEventListener('click', () => {
+  const isMax = terminalPanel.style.maxHeight === '60vh'
+  terminalPanel.style.maxHeight = isMax ? '200px' : '60vh'
+})
+
+// ================================================================
+// 立绘更新
+// ================================================================
+
 function updateImage(emotion) {
   const charUrl = window.api.getCharacterAssetUrl(characterName, emotion)
   const fallbackUrl = 'netpet://%E4%B8%83%E5%A4%9C/idle.png'
+  petImage.style.opacity = '0.5'
   const img = new Image()
-  img.onload = () => { petImage.src = charUrl }
-  img.onerror = () => { petImage.src = fallbackUrl }
+  img.onload = () => {
+    petImage.src = charUrl
+    petImage.style.opacity = '1'
+  }
+  img.onerror = () => {
+    petImage.src = fallbackUrl
+    petImage.style.opacity = '1'
+  }
   img.src = charUrl
   petImage.onerror = () => {
     petImage.alt = `【缺少素材: ${emotion}.png】`
   }
+  emotionLabel.textContent = emotion
 }
 
-// ===== 显示聊天气泡 =====
-// textContent — 设置元素的纯文本（不会被解析为 HTML，安全）
-// classList.add('show') — 添加 CSS 类，类对应的样式控制气泡的显示/隐藏
-function showBubble(text) {
-  bubble.textContent = text
-  bubble.classList.add('show')
-}
+// ================================================================
+// 标题栏按钮
+// ================================================================
 
-// ===== 最小化按钮 =====
-document.getElementById('min-btn').addEventListener('click', () => {
-  window.api.minimizeWindow()
-})
-
-// ===== 关闭按钮 =====
-// window.close() — 浏览器 API，关闭当前窗口（Electron 中等于关闭窗口）
-document.getElementById('close-btn').addEventListener('click', () => {
-  window.close()
-})
-
-// ===== 设置按钮 =====
-// 通知主进程打开设置窗口
 document.getElementById('settings-btn').addEventListener('click', () => {
   window.api.openSettings()
 })
 
-// ===== 定时提醒触发监听（主进程推送过来的） =====
-// 当定时提醒到期时，主进程通过 IPC 推送 schedule:triggered 事件
-// 提醒文本已经由 LLM 生成好了，直接显示即可
+document.getElementById('min-btn').addEventListener('click', () => {
+  window.api.minimizeWindow()
+})
+
+document.getElementById('close-btn').addEventListener('click', () => {
+  window.close()
+})
+
+// ================================================================
+// 主进程推送监听
+// ================================================================
+
 window.api.onScheduleTriggered((data) => {
-  showBubble(data.reply)
   currentEmotion = data.emotion || 'idle'
   updateImage(currentEmotion)
+  addAssistantMessage(data.reply)
 })
 
-// ===== 主动问候触发监听 =====
-// 当用户长时间离线后重新打开时，主进程通过 IPC 推送 proactive:greeting
-// data = { reply, emotion, gap } （LLM 生成的关心话语 + 间隔描述）
 window.api.onProactiveGreeting((data) => {
-  showBubble(data.reply)
   currentEmotion = data.emotion || 'idle'
   updateImage(currentEmotion)
+  addAssistantMessage(data.reply)
 })
 
-// ===== Session 变更监听 =====
-// 当用户在设置窗口切换角色、新开会话、恢复历史会话时触发
 window.api.onSessionChanged((data) => {
-  bubble.textContent = ''
-  bubble.classList.remove('show')
+  messageList.innerHTML = ''
   currentEmotion = 'idle'
   updateImage('idle')
   characterName = data.characterId || characterName
+  titlebarName.textContent = characterName
+  addSystemMessage(`已切换到 ${characterName}`)
 })
+
+// ================================================================
+// 主题实时推送（设置窗口修改时）
+// ================================================================
+
+window.api.onThemeApply((data) => {
+  applyTheme(data.bg, data.accent)
+})
+
+// ================================================================
+// 工具函数
+// ================================================================
+
+function escapeHtml(text) {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
+}
+
+function formatTime(date) {
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function applyTheme(bgHex, accentHex) {
+  const root = document.documentElement
+
+  const pc = (hex, start) => parseInt(hex.slice(start, start + 2), 16) / 255
+  const rr = pc(bgHex, 1), gg = pc(bgHex, 3), bb = pc(bgHex, 5)
+  const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb)
+  let h = 0, s = 0, l = (max + min) / 2
+  if (max !== min) {
+    const d = max - min
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+    h = max === rr ? (gg - bb) / d + (gg < bb ? 6 : 0)
+      : max === gg ? (bb - rr) / d + 2
+      : (rr - gg) / d + 4
+    h /= 6
+  }
+  const isDark = l < 0.25
+  const hs = (dl) => `hsl(${Math.round(h * 360)}, ${Math.round(s * 100)}%, ${Math.round(Math.max(0, Math.min(100, (l + dl) * 100)))}%)`
+
+  root.style.setProperty('--bg', bgHex)
+  root.style.setProperty('--bg-titlebar', hs(-0.04))
+  root.style.setProperty('--bg-sidebar', hs(0.02))
+  root.style.setProperty('--bg-workspace', hs(0.04))
+  root.style.setProperty('--bg-input-area', hs(0))
+  root.style.setProperty('--bg-input-field', hs(-0.04))
+  root.style.setProperty('--bg-terminal', hs(-0.06))
+  root.style.setProperty('--bg-bubble-assistant', hs(0.05))
+  root.style.setProperty('--bg-hover', hs(0.05))
+  root.style.setProperty('--bg-hover2', hs(0.08))
+  root.style.setProperty('--text', isDark ? '#ddd' : '#222')
+  root.style.setProperty('--text-dim', isDark ? '#888' : '#666')
+  root.style.setProperty('--text-muted', isDark ? '#555' : '#999')
+  root.style.setProperty('--text-bright', isDark ? '#a0a0b8' : '#555')
+  root.style.setProperty('--text-user-bubble', isDark ? '#e0e8ff' : '#fff')
+  root.style.setProperty('--text-time', isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.15)')
+  root.style.setProperty('--border', hs(isDark ? 0.08 : -0.08))
+  root.style.setProperty('--border-terminal', hs(isDark ? 0.1 : -0.1))
+  root.style.setProperty('--expand-btn-bg', hs(0.08))
+  root.style.setProperty('--expand-btn-text', isDark ? '#888' : '#666')
+
+  const ar = pc(accentHex, 1), ag = pc(accentHex, 3), ab = pc(accentHex, 5)
+  const cl = (v) => Math.min(255, Math.max(0, Math.round(v)))
+  root.style.setProperty('--accent', accentHex)
+  root.style.setProperty('--accent-light', `rgb(${cl(ar*255+90)}, ${cl(ag*255+80)}, ${cl(ab*255+70)})`)
+  root.style.setProperty('--accent-bg', `rgba(${cl(ar*255)}, ${cl(ag*255)}, ${cl(ab*255)}, 0.6)`)
+  root.style.setProperty('--accent-hover', `rgba(${cl(ar*255)}, ${cl(ag*255)}, ${cl(ab*255)}, 0.75)`)
+  root.style.setProperty('--accent-focus', `rgba(${cl(ar*255)}, ${cl(ag*255)}, ${cl(ab*255)}, 0.5)`)
+}

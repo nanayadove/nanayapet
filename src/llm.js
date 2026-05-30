@@ -180,7 +180,7 @@ async function callChatModel(config, extraMessages, userContent, isSystem, sessi
   if (!prov?.api_key || !prov?.base_url) throw new Error('API 未配置')
 
   const systemPrompt = config.character_settings?.system_prompt || ''
-  const formatLock = '\n\n【回复格式——系统锁定，请勿在角色设定中重复编写】\n你的回复必须以 [emotion=表情] 开头，表情后直接换行写正文。表情只能从六种中选择：idle（默认）、happy（开心）、angry（生气）、sad（伤心）、shy（害羞）、confused（困惑）。\n格式示例:\n[emotion=idle]\n主人，今天外面的天气不错哦。\n[emotion=happy]\n哈哈哈，吾辈也觉得这个笑话很好笑！\n\n注意：回复中绝对不要出现 [completed] 或 [need_search] 标签，这些由后台系统自动处理。'
+  const formatLock = '\n\n【回复格式——系统锁定，请勿在角色设定中重复编写】\n你的每条回复必须以一个 [emotion=表情] 开头（且仅此一个），表情后直接换行写正文。正文中禁止再次出现 [emotion=xxx]。表情只能从六种中选择：idle（默认）、happy（开心）、angry（生气）、sad（伤心）、shy（害羞）、confused（困惑）。\n格式示例:\n[emotion=idle]\n主人，今天外面的天气不错哦。\n\n注意：回复中绝对不要出现 [completed] 或 [need_search] 标签，这些由后台系统自动处理。'
   const effectivePrompt = systemPrompt
     .replace(/\n*【回复格式】[\s\S]*/g, '')
     .replace(/\n*回复时严格输出 JSON[：:][\s\S]*/g, '')
@@ -616,6 +616,7 @@ function parseChatResponse(text) {
     errLog(`[emotion] 标签缺失，LLM输出前100字: ${text.slice(0, 100)}`)
   }
 
+  working = working.replace(/\[emotion=\w+\]\s*/gi, '')
   return { reply: working || '呃...', emotion }
 }
 

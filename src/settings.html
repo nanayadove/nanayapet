@@ -9,8 +9,8 @@
     html { width: 100vw; height: 100vh; overflow: hidden; }
     body {
       font-family: "Microsoft YaHei", sans-serif;
-      background: #f0f0f5;
-      color: #333;
+      background: var(--settings-bg, #f0f0f5);
+      color: var(--settings-text, #333);
       display: flex;
       height: 100vh;
       width: 100vw;
@@ -20,7 +20,7 @@
     /* ===== 左侧导航栏 ===== */
     nav {
       width: 120px;
-      background: #e8e8ee;
+      background: var(--settings-nav-bg, #e8e8ee);
       padding: 10px 0;
       display: flex;
       flex-direction: column;
@@ -30,11 +30,10 @@
     nav .nav-title {
       padding: 10px 16px 6px;
       font-size: 12px;
-      color: #999;
+      color: var(--settings-muted, #999);
       text-transform: uppercase;
       letter-spacing: 1px;
     }
-    /* .tab — 导航标签按钮 */
     .tab {
       display: flex;
       align-items: center;
@@ -45,12 +44,11 @@
       border: none;
       border-radius: 0;
       cursor: pointer;
-      color: #555;
+      color: var(--settings-text, #555);
       text-align: left;
       transition: background 0.15s;
     }
-    .tab:hover { background: #dcdce4; }
-    /* .tab.active — 当前选中标签高亮 */
+    .tab:hover { background: var(--settings-hover, #dcdce4); }
     .tab.active {
       background: #4CAF50;
       color: white;
@@ -62,24 +60,26 @@
       flex: 1;
       padding: 20px 20px 70px 20px;
       overflow-y: auto;
+      background: var(--settings-main-bg, transparent);
     }
-    /* .page — 每个分类对应的内容块，默认隐藏 */
     .page { display: none; }
     .page.active { display: block; }
     .page h3 {
       font-size: 16px;
       margin-bottom: 12px;
       padding-bottom: 6px;
-      border-bottom: 1px solid #ddd;
+      border-bottom: 1px solid var(--settings-border, #ddd);
     }
     .group { margin-bottom: 12px; }
     .group label {
-      display: block; font-size: 12px; color: #666; margin-bottom: 3px;
+      display: block; font-size: 12px; color: var(--settings-dim, #666); margin-bottom: 3px;
     }
     .group input, .group select, .group textarea {
-      width: 100%; padding: 7px 9px; border: 1px solid #ccc;
+      width: 100%; padding: 7px 9px; border: 1px solid var(--settings-border, #ccc);
       border-radius: 5px; font-size: 13px;
       font-family: "Microsoft YaHei", sans-serif;
+      background: var(--settings-input-bg, white);
+      color: var(--settings-text, #333);
     }
     .group textarea { resize: vertical; }
     .model-row { display: flex; gap: 8px; }
@@ -94,22 +94,22 @@
       border: 1px solid #4CAF50; border-radius: 5px;
       font-size: 13px; padding: 4px;
       font-family: "Microsoft YaHei", sans-serif;
+      background: var(--settings-input-bg, white);
+      color: var(--settings-text, #333);
     }
     .tip {
-      font-size: 11px; color: #999; margin-top: 2px;
+      font-size: 11px; color: var(--settings-muted, #999); margin-top: 2px;
     }
-    /* 开关样式 */
     .switch-row {
       display: flex; align-items: center; justify-content: space-between;
       padding: 8px 0;
     }
-    .switch-row label { font-size: 13px; color: #333; margin: 0; }
-    /* toggle 开关 (纯 CSS) */
+    .switch-row label { font-size: 13px; color: var(--settings-text, #333); margin: 0; }
     .toggle { position: relative; display: inline-block; width: 44px; height: 24px; }
     .toggle input { opacity: 0; width: 0; height: 0; }
     .slider {
       position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-      background: #ccc; border-radius: 24px; transition: .3s;
+      background: var(--settings-slider, #ccc); border-radius: 24px; transition: .3s;
     }
     .slider::before {
       content: ""; position: absolute; height: 18px; width: 18px;
@@ -117,7 +117,6 @@
     }
     input:checked + .slider { background: #4CAF50; }
     input:checked + .slider::before { transform: translateX(20px); }
-    /* 底部按钮 */
     footer {
       position: absolute; bottom: 16px; left: 120px; right: 20px;
       display: flex; gap: 8px; justify-content: flex-end;
@@ -127,11 +126,39 @@
       cursor: pointer; font-size: 13px;
     }
     #btn-save { background: #4CAF50; color: white; }
-    #btn-cancel { background: #ccc; color: #333; }
+    #btn-cancel { background: var(--settings-cancel-bg, #ccc); color: var(--settings-cancel-text, #333); }
     #status {
       position: absolute; bottom: 48px; left: 120px; right: 20px;
-      font-size: 12px; color: #888; text-align: right;
+      font-size: 12px; color: var(--settings-muted, #888); text-align: right;
     }
+    /* 深色主题下覆盖内联样式（低优先级，不覆盖变量已有的） */
+    table { border-color: var(--settings-border); }
+    table td, table th { border-color: var(--settings-border); }
+    #export-modal button, #kb-add-area input, #kb-add-area select, #kb-toolbar input, #kb-toolbar select {
+      border-color: var(--settings-border) !important;
+      background: var(--settings-input-bg) !important;
+      color: var(--settings-text) !important;
+    }
+    #kb-btn-prev, #kb-btn-next {
+      border-color: var(--settings-border) !important;
+      background: var(--settings-input-bg, white) !important;
+      color: var(--settings-text, #333) !important;
+    }
+    .preset-theme {
+      border-color: var(--settings-border, #ccc) !important;
+    }
+    #btn-theme-preview {
+      border-color: var(--settings-border) !important;
+      background: var(--settings-input-bg) !important;
+      color: var(--settings-text) !important;
+    }
+    #theme-bg-hex, #theme-accent-hex { color: var(--settings-text) !important; }
+    #export-modal-cancel {
+      border-color: var(--settings-border) !important;
+      background: var(--settings-input-bg) !important;
+      color: var(--settings-text) !important;
+    }
+    #char-status, #search-key-status { color: var(--settings-muted) !important; }
   </style>
 </head>
 <body>
@@ -147,6 +174,7 @@
     <button class="tab" data-page="page-chat"><span class="tab-icon">💬</span> 主动搭话</button>
     <button class="tab" data-page="page-sessions"><span class="tab-icon">📋</span> 对话管理</button>
     <button class="tab" data-page="page-knowledge-mgr"><span class="tab-icon">🗄️</span> 知识库管理</button>
+    <button class="tab" data-page="page-appearance"><span class="tab-icon">🎨</span> 外观主题</button>
   </nav>
 
   <!-- 右侧内容 -->
@@ -553,6 +581,51 @@
           <button id="kb-btn-prev" style="padding:4px 10px;border:1px solid #ccc;background:white;border-radius:3px;cursor:pointer;font-size:12px;" disabled>上一页</button>
           <button id="kb-btn-next" style="padding:4px 10px;border:1px solid #ccc;background:white;border-radius:3px;cursor:pointer;font-size:12px;" disabled>下一页</button>
         </div>
+      </div>
+    </div>
+
+    <!-- ===== 外观主题 ===== -->
+    <div id="page-appearance" class="page">
+      <h3>外观主题</h3>
+      <div class="group">
+        <label>窗口背景色</label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <input id="inp-theme-bg" type="color" style="width:48px;height:36px;padding:2px;border:1px solid #ccc;border-radius:4px;cursor:pointer;">
+          <span id="theme-bg-hex" style="font-size:13px;color:#666;"></span>
+        </div>
+      </div>
+      <div class="group">
+        <label>强调色</label>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <input id="inp-theme-accent" type="color" style="width:48px;height:36px;padding:2px;border:1px solid #ccc;border-radius:4px;cursor:pointer;">
+          <span id="theme-accent-hex" style="font-size:13px;color:#666;"></span>
+        </div>
+      </div>
+      <div class="group" style="margin-top:8px;">
+        <label>预设</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <button class="preset-theme" data-bg="#1a1a24" data-accent="#5a6ac0" style="width:32px;height:32px;border-radius:6px;border:2px solid #ccc;background:#1a1a24;cursor:pointer;position:relative;" title="暗夜紫">
+            <span style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#5a6ac0;"></span>
+          </button>
+          <button class="preset-theme" data-bg="#1a2424" data-accent="#4a9ec0" style="width:32px;height:32px;border-radius:6px;border:2px solid #ccc;background:#1a2424;cursor:pointer;position:relative;" title="深海蓝">
+            <span style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#4a9ec0;"></span>
+          </button>
+          <button class="preset-theme" data-bg="#1a241a" data-accent="#5ac07a" style="width:32px;height:32px;border-radius:6px;border:2px solid #ccc;background:#1a241a;cursor:pointer;position:relative;" title="森林绿">
+            <span style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#5ac07a;"></span>
+          </button>
+          <button class="preset-theme" data-bg="#241a1a" data-accent="#c07a5a" style="width:32px;height:32px;border-radius:6px;border:2px solid #ccc;background:#241a1a;cursor:pointer;position:relative;" title="暖橘棕">
+            <span style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#c07a5a;"></span>
+          </button>
+          <button class="preset-theme" data-bg="#241a24" data-accent="#c05a8a" style="width:32px;height:32px;border-radius:6px;border:2px solid #ccc;background:#241a24;cursor:pointer;position:relative;" title="桃粉">
+            <span style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#c05a8a;"></span>
+          </button>
+          <button class="preset-theme" data-bg="#f5f0e8" data-accent="#5a8ac0" style="width:32px;height:32px;border-radius:6px;border:2px solid #ccc;background:#f5f0e8;cursor:pointer;position:relative;" title="暖白">
+            <span style="position:absolute;bottom:2px;right:2px;width:10px;height:10px;border-radius:50%;background:#5a8ac0;"></span>
+          </button>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <button id="btn-theme-preview" style="padding:6px 16px;border:1px solid #ccc;background:white;border-radius:4px;cursor:pointer;font-size:13px;">预览到宠物窗口</button>
       </div>
     </div>
   </main>

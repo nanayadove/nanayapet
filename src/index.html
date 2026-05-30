@@ -1,61 +1,58 @@
 <!DOCTYPE html>
-<!-- ===== index.html — 宠物主窗口页面 ===== -->
-<!--
-  HTML 基础概念：
-    <!DOCTYPE html> — 声明这是 HTML5 文档
-    <html>         — 根元素
-    <head>         — 头部（元信息、标题、样式引用）
-    <body>         — 身体（页面可见内容）
-    <div>          — 块级容器（最常用的布局元素）
-    <span>         — 行内容器（用于小块文本）
-    <img>          — 图片元素
-    <input>        — 输入框元素
-    <button>       — 按钮元素
-    <script>       — 引入 JS 文件
-
-  id 属性 — 元素的唯一标识符，JS 用 document.getElementById(id) 找到它
-  class 属性 — CSS 类名，用于样式选择
--->
 <html>
 <head>
   <meta charset="UTF-8">
-  <!-- Content-Security-Policy (CSP) — 浏览器安全策略，限制页面能加载哪些资源
-       default-src 'self' — 默认只允许同源资源
-       img-src 'self' data: — 允许同源图片和 data: URI（内嵌图片）
-       style-src 'self' 'unsafe-inline' — 允许同源样式和内联样式
-       script-src 'self' — 只允许同源脚本（不能加载外部 JS） -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: netpet:; style-src 'self' 'unsafe-inline'; script-src 'self';"> 
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: netpet:; style-src 'self' 'unsafe-inline'; script-src 'self';">
   <title>NetPet</title>
-  <!-- <link rel="stylesheet"> — 引入外部 CSS 样式文件 -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- spacer — 弹性占位空间，把下面内容推到窗口底部 -->
-  <div class="spacer"></div>
-
-  <!-- 顶部按钮栏：设置和关闭按钮 -->
-  <div id="top-bar">
-    <span></span><!-- 空 span 做弹性占位，让按钮靠右 -->
-    <button id="settings-btn" class="top-btn">⚙</button>
-    <button id="min-btn" class="top-btn" title="最小化">-</button>
-    <button id="close-btn" class="top-btn close">×</button>
+  <div id="titlebar">
+    <div id="titlebar-drag">
+      <span class="titlebar-app">NetPet</span>
+      <span class="titlebar-sep">—</span>
+      <span id="titlebar-name" class="titlebar-name">七夜</span>
+    </div>
+    <div id="titlebar-actions">
+      <button id="collapse-btn" class="titlebar-btn" title="收起面板">◀</button>
+      <button id="settings-btn" class="titlebar-btn" title="设置">⚙</button>
+      <button id="min-btn" class="titlebar-btn" title="最小化">−</button>
+      <button id="close-btn" class="titlebar-btn titlebar-close" title="关闭">×</button>
+    </div>
   </div>
 
-  <!-- 聊天气泡 — 显示 LLM 回复文本 -->
-  <!-- 初始显示"加载中..."，JS 加载配置后替换 -->
-  <div id="bubble">加载中...</div>
+  <div id="main">
+    <div id="sidebar">
+      <div id="image-area">
+        <img id="pet-image" src="../assets/idle.png" alt="pet">
+      </div>
+      <div id="emotion-label">idle</div>
+      <button id="expand-btn" title="展开面板">▶</button>
+    </div>
 
-  <!-- 角色立绘 — 显示 PNG 图片 -->
-  <!-- 初始显示 idle.png（默认表情） -->
-  <div id="image-area">
-    <img id="pet-image" src="../assets/idle.png" alt="pet">
+    <div id="workspace">
+      <div id="mode-tabs">
+        <button class="mode-tab active" data-mode="chat">闲聊</button>
+        <button class="mode-tab" data-mode="work">工作</button>
+      </div>
+      <div id="message-list"></div>
+      <div id="terminal-panel" class="hidden">
+        <div id="terminal-toolbar">
+          <span class="terminal-label">终端输出</span>
+          <div class="terminal-actions">
+            <button id="terminal-copy-btn" title="复制">复制</button>
+            <button id="terminal-expand-btn" title="展开">展开</button>
+          </div>
+        </div>
+        <pre id="terminal-output"></pre>
+      </div>
+      <div id="input-area">
+        <input id="drawer-input" type="text" placeholder="输入消息... (Enter 发送)">
+        <button id="send-btn" title="发送">发送</button>
+      </div>
+    </div>
   </div>
 
-  <!-- 输入框 — type="text" 文本输入 -->
-  <!-- placeholder — 输入框为空时显示的提示文本 -->
-  <input id="input-field" type="text" placeholder="在这里输入你想对它说的话... (按回车发送)">
-
-  <!-- <script src="..."> — 引入 JS 文件（放在 body 末尾，保证 DOM 已加载） -->
   <script src="renderer.js"></script>
 </body>
 </html>

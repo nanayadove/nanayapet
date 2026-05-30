@@ -67,6 +67,8 @@ contextBridge.exposeInMainWorld('api', {
   openSettings: () => ipcRenderer.invoke('settings:open'),
   // minimizeWindow() — 最小化宠物窗口
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
+  // resizeWindow(width, height) — 调整窗口尺寸
+  resizeWindow: (width, height) => ipcRenderer.invoke('window:resize', width, height),
 
   // ============ 工具管理 ============
 
@@ -94,4 +96,8 @@ contextBridge.exposeInMainWorld('api', {
   getSessionMessages: (sessionId) => ipcRenderer.invoke('session:get-messages', sessionId),
 
   getCharacterAssetUrl: (characterName, emotion) => `netpet://${encodeURIComponent(characterName)}/${encodeURIComponent(emotion)}.png`,
+
+  onThemeApply: (callback) => {
+    ipcRenderer.on('theme:apply', (_event, data) => callback(data))
+  },
 })

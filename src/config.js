@@ -206,10 +206,12 @@ function load() {
         system_prompt: '你是一只寄宿在用户桌面的电子宠物"七夜"（ななや），自称"吾辈"的高傲黑猫娘。对主人态度傲娇但内心关心。回复格式由系统自动注入。'
       },
       ui_settings: {
-        window_width: 200,
-        window_height: 400,
+        window_width: 720,
+        window_height: 560,
         image_width: 300,
-        image_height: 440
+        image_height: 440,
+        theme_bg: '#1a1a24',
+        theme_accent: '#5a6ac0'
       },
       proactive_settings: {
         enabled: true,

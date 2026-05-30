@@ -456,3 +456,230 @@ created_at    DATETIME
   → 按 Session 导出对话历史 (Markdown/JSON)
   → 按 classification 导出知识库 (JSON)
 ```
+
+---
+
+## 🔜 阶段八：UI 重构 — 分体式面板 [规划中]
+
+> 当前 UI 为单气泡 + 立绘 + 输入框的极简结构，无法展示聊天历史、工具执行过程、终端输出等内容。
+> 目标：**宠物立绘保持独立浮窗** + **右侧可收起的抽屉面板**，兼顾观赏性和功能性。
+
+### 8.1 主窗口架构
+
+```
+┌─────────────────┬──────────────────────────┐
+│                 │                          │
+│   宠物立绘区    │   [聊天区]                │
+│   (透明浮窗)    │   对话历史 (滚动)         │
+│                 │   系统消息 (工具调用等)    │
+│   300×440       │   命令行输出              │
+│                 │                          │
+│                 │  ──────────────────────  │
+│   立绘切换      │   [输入区]                │
+│   动画保留      │   <input> + 发送按钮      │
+│                 │   模式切换标签            │
+│                 │                          │
+└─────────────────┴──────────────────────────┘
+         ↑                    ↑
+   独立透明窗口         右侧可收起抽屉
+   (始终可见)           (hover/点击展开)
+```
+
+### 8.2 右侧面板设计
+
+| 区域 | 内容 | 说明 |
+|------|------|------|
+| **对话历史** | 滚动消息列表（user/assistant/system） | user 消息右对齐蓝色气泡，assistant 左对齐白色气泡，system 灰色小字 |
+| **工具执行状态** | 内联展示工具调用过程 | `🔧 正在搜索...` → `✅ 搜索完成 (3条结果)` |
+| **终端输出** | 命令行执行结果展示 | 折叠/展开，语法高亮，长输出截断 + "查看完整输出"按钮 |
+| **模式标签栏** | 闲聊 / 工作 模式切换 | 闲聊模式隐藏终端面板，工作模式展开全功能 |
+| **输入区** | 输入框 + 发送 + 模式切换 | 固定底部，类似聊天应用 |
+
+### 8.3 UI 组件树
+
+```
+index.html (重构)
+├── #left-panel (宠物浮窗 — 保留现有逻辑)
+│   ├── #top-bar (设置/最小化/关闭)
+│   ├── #image-area (立绘区，保留拖拽置顶)
+│   └── #emotion-indicator (可选: 当前情绪小标签)
+│
+└── #right-drawer (右侧抽屉面板 — 新增)
+    ├── #drawer-handle (拖拽手柄/收起按钮)
+    ├── #drawer-tabs (模式标签: 💬闲聊 / 💻工作)
+    ├── #message-list (对话历史 — 新增)
+    │   ├── .msg-user (用户消息气泡)
+    │   ├── .msg-assistant (助手消息气泡)
+    │   └── .msg-system (系统/工具消息)
+    ├── #terminal-panel (终端输出区 — 新增，工作模式可见)
+    │   ├── #terminal-output (命令执行结果)
+    │   └── #terminal-toolbar (复制/展开/收起)
+    └── #input-area (输入区 — 重构)
+        ├── #input-field (输入框)
+        └── #send-btn (发送按钮)
+```
+
+### 8.4 交互设计
+
+- **抽屉收起/展开**：右侧面板默认半透明贴合屏幕右侧，鼠标 hover 时滑出，离开后延迟缩回；点击抽屉手柄锁定展开
+- **模式切换**：标签切换闲聊模式（只显示聊天历史）和工作模式（聊天历史 + 终端面板）
+- **宠物始终可见**：左侧立绘区不受右侧面板影响，始终保持透明浮窗特性
+- **窗口拖拽**：左侧立绘区保留 `-webkit-app-region: drag`，右侧面板不参与拖拽
+- **尺寸记忆**：窗口整体尺寸记忆（宽度 = 立绘 + 面板），面板宽度可拖拽调整
+- **`[emotion=xxx]` 动画**：立绘切换增加淡入淡出过渡（CSS transition）
+
+### 8.5 设置窗口适配
+
+- settings.html 可能合并入右侧面板的"设置"标签，也可能保持独立窗口
+- 短期：保持独立设置窗口不变，右侧面板仅承载聊天和终端功能
+- 长期：设置窗口改为面板内的全屏覆盖层（减少窗口数量）
+
+### 8.6 技术约束
+
+- Electron 透明窗口 `transparent: true` 需保持，立绘区继续使用透明背景
+- 右侧面板使用半透明毛玻璃效果（`backdrop-filter: blur()`）或纯色背景
+- CSP 策略需放开 `img-src` 和 `style-src` 以支持 netpet:// 协议
+- 现有 renderer.js 逻辑尽量保留，新增 drawer.js 处理面板逻辑
+
+---
+
+## 🔜 阶段九：命令行工作协助 [规划中]
+
+> 目标：NetPet 成为真正的 Agent 框架，能执行 shell 命令、读写文件、搜索代码、操作 Git，辅助用户完成软件开发等 CLI 工作。
+
+### 9.1 Shell 执行工具 (`run_command`)
+
+- **功能**：在工作目录下执行任意 shell 命令，返回 stdout + stderr + exit code
+- **参数**：`command` (必填), `cwd` (可选，默认 workspace_root), `timeout` (可选，默认 30s)
+- **实现**：`child_process.exec()` + 超时 kill + 输出截断（>2000 行存临时文件）
+- **输出展示**：结果注入对话上下文 + 终端面板实时打印
+
+### 9.2 文件系统工具
+
+| 工具 | 用途 | 参数 |
+|------|------|------|
+| `read_file` (真实文件) | 读取磁盘文件内容 | `path`, `offset?`, `limit?` |
+| `list_dir` | 列出目录结构 | `path?`, `depth?` (默认 2) |
+| `search_files` | ripgrep 全文搜索 | `pattern`, `path?`, `include?` (如 `*.js`) |
+| `edit_file` | 精确字符串替换编辑 | `path`, `oldString`, `newString`, `replaceAll?` |
+| `write_file` | 写入/创建文件 | `path`, `content` (覆盖现有文件) |
+
+### 9.3 Git 集成工具
+
+| 工具 | 用途 | 需确认 |
+|------|------|--------|
+| `git_status` | 查看工作区状态 | 否 |
+| `git_diff` | 查看差异（staged/unstaged） | 否 |
+| `git_log` | 查看提交历史 | 否 |
+| `git_commit` | 提交更改 (message 由 LLM 生成) | **是** |
+| `git_branch` | 查看/切换分支 | 否（切换需确认） |
+
+### 9.4 开发流程工具
+
+| 工具 | 用途 | 实现方式 |
+|------|------|---------|
+| `run_test` | 运行测试 | 读 package.json 的 test script |
+| `run_lint` | 运行代码检查 | 读 package.json 的 lint script |
+| `npm_install` | 安装依赖 | `npm install`，需确认 |
+| `task_multi` | LLM 多步自主执行 | 循环：读取→修改→运行测试→看结果→继续改 |
+
+### 9.5 安全与权限模型
+
+```
+危险级别:
+  L0 (安全) — 只读命令         → 自动执行，不询问
+    ls, dir, cat, type, git status, git diff, git log,
+    npm list, node --version, echo, pwd, which, where
+
+  L1 (需确认) — 修改工作区     → 首次弹窗确认，可"记住本次会话"
+    git add, git commit, npm install, npm run build,
+    mkdir, touch, cp, mv
+
+  L2 (强制拦截) — 危险操作      → 永远弹窗警告，不可记住
+    rm -rf, del /s /q, git push --force,
+    git reset --hard, npm publish, curl/wget 下载执行,
+    任何包含 ; 或 && 的多命令链
+
+  工作目录限制:
+    - 默认 workspace_root (config 配置)
+    - 禁止访问系统目录 (C:\Windows, /etc, ~/.ssh 等)
+    - 禁止写入 .env / config.json 等敏感文件
+```
+
+### 9.6 配置项
+
+```json
+{
+  "cli_settings": {
+    "enabled": true,
+    "workspace_root": "C:\\Users\\用户名",
+    "shell": "powershell",          // powershell / cmd / bash
+    "default_timeout": 30000,       // 默认命令超时 (ms)
+    "max_output_lines": 2000,       // 输出截断行数
+    "confirm_dangerous": true,      // 危险命令是否弹窗确认
+    "whitelist_commands": [],       // 额外白名单命令
+    "blacklist_commands": [],       // 额外黑名单命令
+    "auto_detect_git": true         // 自动检测 Git 仓库作为工作目录
+  }
+}
+```
+
+### 9.7 IPC 通道 (新增)
+
+| 通道 | 方向 | 用途 |
+|------|------|------|
+| `cli:execute` | Renderer → Main | 执行 shell 命令 |
+| `cli:cancel` | Renderer → Main | 取消正在执行的命令 |
+| `cli:output` | Main → Renderer | 流式推送命令输出（大输出分批推送） |
+| `cli:confirm` | Main → Renderer | 请求用户确认危险操作 |
+| `cli:confirm-reply` | Renderer → Main | 用户确认结果 |
+
+### 9.8 工具模型适配
+
+- `tool-prompt.js` 新增 7 个工具声明（run_command + 5 文件系统 + git_*）
+- 工具模型 prompt 中加入工作目录上下文和 Git 状态摘要
+- `tools/index.js` 注册新工具方法，复用现有路由模式
+- 新增 `tools/run-command.js`、`tools/list-dir.js`、`tools/search-files.js`、`tools/edit-file.js`、`tools/git.js`
+
+### 9.9 渐进式交付计划
+
+```
+第一阶段 — 基础 CLI (配合 UI 重构同步交付)
+  └─ run_command     (核心 shell 执行)
+  └─ read_file       (真实文件读取)
+  └─ list_dir        (目录浏览)
+  └─ 右侧终端面板    (UI 展示)
+
+第二阶段 — 开发辅助
+  └─ search_files    (代码搜索)
+  └─ edit_file       (文件编辑)
+  └─ git_status / git_diff / git_log
+
+第三阶段 — 自动化工作流
+  └─ git_commit      (带确认)
+  └─ run_test / run_lint
+  └─ task_multi      (多步自主执行循环)
+```
+
+---
+
+## 🔜 阶段十：多平台 + 高级特性 [远期规划]
+
+### 10.1 跨平台支持
+- [ ] macOS 适配（透明窗口、系统托盘、safeStorage Keychain、command 键修饰符）
+- [ ] Linux 适配（X11/Wayland 透明窗口、libsecret 加密、AppIndicator 托盘）
+- [ ] macOS DMG + Linux AppImage 打包
+
+### 10.2 语音交互
+- [ ] TTS 语音合成（读回复），支持 Edge TTS / OpenAI TTS
+- [ ] STT 语音输入（说消息），支持 Whisper API / Web Speech API
+- [ ] 语音唤醒词（"小七" 等）
+
+### 10.3 多模态
+- [ ] 图片识别：用户发截图 → 视觉模型理解内容
+- [ ] 桌面截图工具：`take_screenshot` 工具，分析屏幕内容
+
+### 10.4 插件系统
+- [ ] 工具插件化：第三方可注册自定义工具和 prompt
+- [ ] 角色市场：在线下载/分享角色卡和立绘
+- [ ] 工作流模板：预设 Agent 行为链（代码审查、写周报等）

@@ -74,6 +74,13 @@ const btnCancel = document.getElementById('btn-cancel')
 const statusEl = document.getElementById('status')
 const modelSelect = document.getElementById('model-select')
 
+// ===== 外观主题元素 =====
+const inpThemeBg = document.getElementById('inp-theme-bg')
+const themeBgHex = document.getElementById('theme-bg-hex')
+const inpThemeAccent = document.getElementById('inp-theme-accent')
+const themeAccentHex = document.getElementById('theme-accent-hex')
+const btnThemePreview = document.getElementById('btn-theme-preview')
+
 let currentConfig = {}
 
 // ================================================================
@@ -184,6 +191,15 @@ function applyToUI(config) {
   const ai = ks.auto_inject || {}
   inpAutoInject.checked = ai.enabled !== false
   inpMaxItems.value = ai.max_items ?? 8
+
+  const ui = config.ui_settings || {}
+  const bg = ui.theme_bg || ui.theme_color || '#1a1a24'
+  const accent = ui.theme_accent || ui.theme_color || '#5a6ac0'
+  inpThemeBg.value = bg
+  themeBgHex.textContent = bg
+  inpThemeAccent.value = accent
+  themeAccentHex.textContent = accent
+  applySettingsTheme(bg)
 }
 
 // ================================================================
@@ -301,8 +317,10 @@ function collectFromUI() {
       system_prompt: finalPrompt
     },
     ui_settings: {
-      window_width: 200, window_height: 400,
-      image_width: 300, image_height: 440
+      window_width: 720, window_height: 560,
+      image_width: 300, image_height: 440,
+      theme_bg: inpThemeBg.value,
+      theme_accent: inpThemeAccent.value
     },
     proactive_settings: {
       enabled: inpProactiveEnabled.checked,
@@ -913,5 +931,53 @@ document.querySelectorAll('.tab').forEach(tab => {
     }
   })
 })
+
+// ================================================================
+// 外观主题 — 颜色选择器 / 预设 / 预览
+// ================================================================
+
+inpThemeBg.addEventListener('input', () => {
+  themeBgHex.textContent = inpThemeBg.value
+  applySettingsTheme(inpThemeBg.value)
+})
+
+inpThemeAccent.addEventListener('input', () => {
+  themeAccentHex.textContent = inpThemeAccent.value
+})
+
+document.querySelectorAll('.preset-theme').forEach(btn => {
+  btn.addEventListener('click', () => {
+    inpThemeBg.value = btn.dataset.bg
+    themeBgHex.textContent = btn.dataset.bg
+    inpThemeAccent.value = btn.dataset.accent
+    themeAccentHex.textContent = btn.dataset.accent
+    applySettingsTheme(btn.dataset.bg)
+  })
+})
+
+btnThemePreview.addEventListener('click', () => {
+  window.api.applyTheme({ bg: inpThemeBg.value, accent: inpThemeAccent.value })
+})
+
+function applySettingsTheme(bgHex) {
+  const r = parseInt(bgHex.slice(1, 3), 16)
+  const g = parseInt(bgHex.slice(3, 5), 16)
+  const b = parseInt(bgHex.slice(5, 7), 16)
+  const luma = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  const isDark = luma < 0.4
+  const s = document.documentElement.style
+  s.setProperty('--settings-bg', isDark ? '#252530' : '#f0f0f5')
+  s.setProperty('--settings-text', isDark ? '#ccc' : '#333')
+  s.setProperty('--settings-nav-bg', isDark ? '#1e1e28' : '#e8e8ee')
+  s.setProperty('--settings-main-bg', isDark ? '#252530' : 'transparent')
+  s.setProperty('--settings-hover', isDark ? '#333' : '#dcdce4')
+  s.setProperty('--settings-dim', isDark ? '#888' : '#666')
+  s.setProperty('--settings-muted', isDark ? '#666' : '#999')
+  s.setProperty('--settings-border', isDark ? '#444' : '#ddd')
+  s.setProperty('--settings-input-bg', isDark ? '#1a1a24' : 'white')
+  s.setProperty('--settings-slider', isDark ? '#555' : '#ccc')
+  s.setProperty('--settings-cancel-bg', isDark ? '#444' : '#ccc')
+  s.setProperty('--settings-cancel-text', isDark ? '#ccc' : '#333')
+}
 
 loadConfig()

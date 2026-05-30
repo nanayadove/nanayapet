@@ -118,36 +118,28 @@ function createWindow() {
   //   cfg.ui_settings && cfg.ui_settings.window_width
   // 如果 ui_settings 不存在就返回 undefined 而不报错
   const ui = cfg.ui_settings || {}
-  const winW = ui.window_width || 280
-  const winH = ui.window_height || 480
+  const winW = ui.window_width || 720
+  const winH = ui.window_height || 560
 
-  // new BrowserWindow({...}) — 创建一个 Electron 窗口
-  // 参数对象配置窗口的各种属性
   mainWindow = new BrowserWindow({
     width: winW,
     height: winH,
-    frame: false,           // 无边框（没有标题栏、关闭按钮等系统装饰）
-    transparent: true,      // 透明背景（让窗口可以是非矩形的）
-    alwaysOnTop: true,      // 窗口始终置顶，不被其他窗口遮挡
-    resizable: true,        // 可拉伸缩放（用户拖拽窗口边缘）
-    minWidth: 240,          // 最小宽度
-    minHeight: 400,         // 最小高度
-    skipTaskbar: true,      // 不在任务栏显示
-    webPreferences: {       // 网页视图（渲染进程）的安全配置
-      // preload: 预加载脚本，在页面 JS 之前执行
-      // 用于把 Node.js 能力安全地暴露给页面
+    frame: false,
+    transparent: false,
+    alwaysOnTop: true,
+    resizable: true,
+    minWidth: 240,
+    minHeight: 400,
+    skipTaskbar: true,
+    backgroundColor: '#1a1a24',
+    webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,  // 隔离上下文（安全最佳实践：页面 JS 和 preload JS 各自有独立的全局对象）
-      nodeIntegration: false,  // 禁止页面直接使用 Node.js API（安全考虑，必须为 false）
+      contextIsolation: true,
+      nodeIntegration: false,
     }
   })
 
-  // mainWindow.loadFile(路径) — 在窗口中加载 HTML 文件
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'))
-
-  // setAspectRatio(宽高比) — 限制窗口只能等比例缩放，拖拽任一边缘自动保持比例
-  // 宽高比 = window_width / window_height，默认 280/480 ≈ 0.583
-  mainWindow.setAspectRatio(winW / winH)
 
   // process.argv — Node.js 的命令行参数数组
   // 如果用 npm run dev 启动，会传入 --dev 参数，此时打开 DevTools
@@ -538,6 +530,21 @@ ipcMain.handle('settings:open', () => openSettings())
 // window:minimize — 隐藏宠物窗口（到托盘）
 ipcMain.handle('window:minimize', () => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide()
+})
+
+// window:resize — 调整宠物窗口尺寸
+ipcMain.handle('window:resize', (_e, width, height) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const [cw, ch] = mainWindow.getSize()
+    mainWindow.setSize(width ?? cw, height ?? ch)
+  }
+})
+
+// theme:apply — 设置窗口实时推送主题到宠物窗口
+ipcMain.handle('theme:apply', (_e, data) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('theme:apply', data)
+  }
 })
 
 // 工具管理 IPC
